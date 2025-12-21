@@ -1,11 +1,10 @@
 python-telegram-bot[job-queue]==20.8
-flask
+flask==3.0.0
 sqlalchemy==2.0.25
 spotipy==2.23.0
 requests==2.31.0
 python-dotenv==1.0.0
 yt-dlp==2024.3.10
-youtube-search-python==1.6.6
 apscheduler==3.10.4
 pytz==2024.1
-musicxmatch_api
+aiohttp==3.9.3
