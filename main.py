@@ -1,5 +1,5 @@
 """
-Music Telegram Bot - Entry Point (نسخه نهایی برای Render - polling در main thread)
+Music Telegram Bot - Entry Point (نسخه نهایی با همه handlerها)
 """
 import os
 import threading
@@ -9,7 +9,6 @@ from flask import Flask
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask برای keep-alive
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -25,26 +24,36 @@ def run_flask():
 # ایمپورت‌های داخلی
 from core.config import config
 from core.database import init_db
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from bot.handlers import (
+    get_start_conversation_handler,
+    get_settings_handlers,
+)
+from bot.handlers.channel import get_channel_handlers
+from bot.handlers.genre import get_genre_handlers
 
 # ساخت اپ تلگرام
+from telegram.ext import Application
+
 application = Application.builder().token(config.BOT_TOKEN).build()
 
-# هندلر ساده برای تست
-async def start(update, context):
-    await update.message.reply_text("🎉 ایول! ربات روی Render کار می‌کنه!\nحالا می‌تونیم handlerهای اصلی رو اضافه کنیم.")
+# ثبت همه handlerهای اصلی
+def register_all_handlers():
+    # ConversationHandler برای /start
+    application.add_handler(get_start_conversation_handler())
+    
+    # handlerهای تنظیمات، ژانر، کانال
+    for handler in get_settings_handlers():
+        application.add_handler(handler)
+    for handler in get_channel_handlers():
+        application.add_handler(handler)
+    for handler in get_genre_handlers():
+        application.add_handler(handler)
 
-application.add_handler(CommandHandler("start", start))
-
-async def unknown(update, context):
-    await update.message.reply_text("🤔 دستور ناشناخته! /start بزن.")
-
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
-
+# error handler
 async def error_handler(update, context):
     logger.error(f"خطا: {context.error}")
     if update and update.effective_message:
-        await update.effective_message.reply_text("❌ خطایی پیش اومد! دوباره امتحان کن.")
+        await update.effective_message.reply_text("❌ متأسفانه یه خطایی پیش اومد!\nلطفاً دوباره امتحان کن.")
 
 application.add_error_handler(error_handler)
 
@@ -61,16 +70,17 @@ def setup_scheduler():
 def main():
     logger.info("🚀 راه‌اندازی ربات...")
     
-    config.validate()  # چک توکن
+    config.validate()
     init_db()
     
+    register_all_handlers()
     setup_scheduler()
     
-    # Flask در thread جدا
+    # Flask در background
     threading.Thread(target=run_flask, daemon=True).start()
     
-    # polling در main thread (مهم!)
-    logger.info("🤖 شروع polling تلگرام در main thread...")
+    # polling در main thread
+    logger.info("🤖 شروع polling...")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
