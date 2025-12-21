@@ -10,6 +10,7 @@ from bot.keyboards.inline import (
     get_time_selection_keyboard,
     get_destination_keyboard
 )
+import random
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,92 +56,101 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         genre_list = ", ".join([g.genre for g in genres]) if genres else "انتخاب نشده"
         
-        status_text = f"""
-📊 وضعیت فعلی شما:
-
-🎵 ژانر(ها): {genre_list}
-⏰ زمان ارسال: {settings.send_time}
-📍 مقصد ارسال: {"کانال" if settings.send_to == "channel" else "پیوی"}
-{"📢 کانال: " + settings.channel_id if settings.channel_id else ""}
-🌍 منطقه زمانی: {settings.timezone}
-        """
+        channel = settings.channel_id if settings.send_to == 'channel' else "پیوی"
         
-        from bot.keyboards.inline import get_back_button
+        status_text = f"ℹ️ وضعیت فعلی تو:\n\n"
+        status_text += f"🎵 ژانرها: {genre_list}\n"
+        status_text += f"⏰ زمان ارسال: {settings.send_time}\n"
+        status_text += f"📍 مقصد: {channel}\n"
+        status_text += f"🌍 منطقه زمانی: {settings.timezone}\n\n"
+        status_text += "هر چیزی خواستی تغییر بدی، از منو استفاده کن!"
+        
         await query.edit_message_text(
-            text=status_text.strip(),
-            reply_markup=get_back_button()
+            text=status_text,
+            reply_markup=get_main_menu_keyboard()
         )
-        
     finally:
         db.close()
 
 
-async def change_genre_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """منوی تغییر ژانر"""
+async def change_genre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تغییر ژانر"""
     query = update.callback_query
     await query.answer()
     
+    user_id = update.effective_user.id
+    
+    # گرفتن ژانرهای فعلی
+    db = SessionLocal()
+    try:
+        current_genres = [g.genre for g in db.query(UserGenre).filter(UserGenre.user_id == user_id).all()]
+    finally:
+        db.close()
+    
     await query.edit_message_text(
-        text="🎵 ژانر جدید رو انتخاب کن:",
-        reply_markup=get_genres_keyboard()
+        text="🎵 ژانرهای مورد علاقه‌ات رو انتخاب کن (چندتا هم می‌تونی بزنی!):",
+        reply_markup=get_genres_keyboard(selected_genres=set(current_genres))
     )
 
 
-async def change_time_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """منوی تغییر زمان"""
+async def change_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تغییر زمان ارسال"""
     query = update.callback_query
     await query.answer()
     
     await query.edit_message_text(
-        text="⏰ زمان جدید رو انتخاب کن:",
+        text="⏰ زمان ارسال روزانه رو انتخاب کن\n\n"
+             "یا دستی بفرست (HH:MM):",
         reply_markup=get_time_selection_keyboard()
     )
 
 
-async def change_destination_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """منوی تغییر مقصد"""
+async def change_destination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تغییر مقصد ارسال"""
     query = update.callback_query
     await query.answer()
     
     await query.edit_message_text(
-        text="📍 مقصد جدید رو انتخاب کن:",
+        text="📍 کجا آهنگ‌ها رو بفرستم؟",
         reply_markup=get_destination_keyboard()
     )
 
 
 async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت کلیک‌های منو"""
+    """مدیریت کال‌بک‌های منو"""
     query = update.callback_query
     data = query.data
     
     if data == "menu_back":
         await show_menu(update, context)
+        
+    elif data == "menu_change_genre":
+        await change_genre(update, context)
+        
+    elif data == "menu_change_time":
+        await change_time(update, context)
+        
+    elif data == "menu_change_dest":
+        await change_destination(update, context)
+        
     elif data == "menu_status":
         await show_status(update, context)
-    elif data == "menu_change_genre":
-        await change_genre_menu(update, context)
-    elif data == "menu_change_time":
-        await change_time_menu(update, context)
-    elif data == "menu_change_dest":
-        await change_destination_menu(update, context)
+        
     elif data == "menu_random":
-        await send_random_music(update, context)
+        await show_random_music(update, context)
 
 
-async def send_random_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ارسال یک موزیک تصادفی الان"""
+async def show_random_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ارسال موزیک تصادفی (برای دکمه menu_random)"""
     query = update.callback_query
-    await query.answer("🎲 در حال جستجوی یک آهنگ تصادفی...", show_alert=False)
+    await query.answer()
     
     user_id = update.effective_user.id
     
-    # گرفتن ژانر کاربر
-    from core.database import UserGenre
+    # گرفتن ژانرهای کاربر
     db = SessionLocal()
     try:
-        user_genres = db.query(UserGenre).filter(
-            UserGenre.user_id == user_id
-        ).all()
+        user_genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
         
         if not user_genres:
             await query.edit_message_text(
@@ -150,7 +160,8 @@ async def send_random_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        genre = user_genres[0].genre
+        # انتخاب ژانر تصادفی اگر چندتا باشه
+        genre = random.choice([g.genre for g in user_genres])
         
     finally:
         db.close()
