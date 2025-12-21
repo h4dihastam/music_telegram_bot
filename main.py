@@ -1,16 +1,14 @@
 """
-Music Telegram Bot - Entry Point (کاملاً اصلاح شده برای Render)
+Music Telegram Bot - Entry Point (کاملاً تست‌شده برای Render)
 """
 import os
 import threading
 import logging
 from flask import Flask
 
-# تنظیم لاگ
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask برای keep-alive
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -33,7 +31,7 @@ from telegram.ext import Application
 
 application = Application.builder().token(config.BOT_TOKEN).build()
 
-# ثبت همه هندلرها
+# ثبت هندلرها
 def register_handlers():
     application.add_handler(get_start_conversation_handler())
     
@@ -58,7 +56,10 @@ def setup_scheduler():
 # polling در thread جدا
 def run_polling():
     logger.info("🤖 شروع polling تلگرام...")
-    application.run_polling(drop_pending_updates=True)
+    try:
+        application.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"❌ خطا در polling: {e}")
 
 # main
 def main():
