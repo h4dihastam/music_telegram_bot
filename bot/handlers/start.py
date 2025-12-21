@@ -31,12 +31,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /start - خوش‌آمدگویی و شروع فرآیند تنظیمات"""
     user = update.effective_user
     
-    # ثبت یا به‌روزرسانی کاربر
+    # ثبت یا به‌روزرسانی کاربر (full_name رو حذف کردیم)
     get_or_create_user(
         user_id=user.id,
         username=user.username,
-        first_name=user.first_name,
-        full_name=user.full_name
+        first_name=user.first_name
     )
     
     welcome_text = f"""
@@ -62,110 +61,97 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== Time Selection ====================
 
 async def time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """انتخاب زمان ارسال"""
+    """کاربر زمان رو از کیبورد انتخاب کرده"""
     query = update.callback_query
     await query.answer()
     
-    time_value = query.data.replace("time_", "")
+    time = query.data.replace('time_', '')
     
-    user_id = update.effective_user.id
-    
-    if time_value == "custom":
-        await query.edit_message_text(
-            text="⏰ خوبه! زمان دلخواهت رو بنویس:\n\n"
-                 "مثال: 14:30 یا 09:00\n"
-                 "فرمت: ساعت:دقیقه (HH:MM)"
-        )
-        return SETTING_TIME
-    else:
-        # ذخیره زمان
-        db = SessionLocal()
-        try:
-            settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-            if not settings:
-                settings = UserSettings(user_id=user_id)
-                db.add(settings)
-            
-            settings.send_time = time_value
-            db.commit()
-            
-            # اضافه کردن job به scheduler
-            if 'scheduler' in context.application.bot_data:
-                scheduler = context.application.bot_data['scheduler']
-                scheduler.add_user_job(user_id, time_value)
-        finally:
-            db.close()
-        
-        context.user_data['send_time'] = time_value
-        
-        await query.edit_message_text(
-            text=f"✅ ساعت {time_value} ذخیره شد!\n\n"
-                 f"📍 حالا بگو موزیک‌ها رو کجا برات بفرستم؟",
-            reply_markup=get_destination_keyboard()
-        )
-        return CHOOSING_DESTINATION
-
-
-async def custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت زمان دلخواه"""
-    import re
-    time_text = update.message.text.strip()
-    
-    if not re.match(r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$", time_text):
-        await update.message.reply_text(
-            "فرمت اشتباهه! لطفاً مثل 14:30 یا 09:00 بنویس."
-        )
-        return SETTING_TIME
-    
-    user_id = update.effective_user.id
+    # ذخیره زمان در دیتابیس
     db = SessionLocal()
     try:
-        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not settings:
-            settings = UserSettings(user_id=user_id)
-            db.add(settings)
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == query.from_user.id
+        ).first()
         
-        settings.send_time = time_text
-        db.commit()
-        
-        if 'scheduler' in context.application.bot_data:
-            scheduler = context.application.bot_data['scheduler']
-            scheduler.add_user_job(user_id, time_text)
+        if settings:
+            settings.send_time = time
+            db.commit()
     finally:
         db.close()
     
-    context.user_data['send_time'] = time_text
-    
-    await update.message.reply_text(
-        text=f"✅ ساعت {time_text} ذخیره شد!\n\n"
-             f"📍 حالا مقصد ارسال رو انتخاب کن:",
+    await query.edit_message_text(
+        text=f"✅ زمان ارسال روزانه تنظیم شد: {time}\n\n"
+             "حالا کجا آهنگ‌ها رو بفرستم؟\n\n"
+             "💬 به همین چت (پیوی)\n"
+             "📢 یا به کانال؟",
         reply_markup=get_destination_keyboard()
     )
+    
     return CHOOSING_DESTINATION
 
 
-# ==================== Destination & Channel ====================
-
-async def destination_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+async def custom_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کاربر زمان رو دستی فرستاده (HH:MM)"""
+    time = update.message.text.strip()
     
-    dest_type = query.data.replace("dest_", "")
-    user_id = update.effective_user.id
+    from utils.helpers import validate_time_format  # فرض می‌کنیم این تابع داری
     
+    if not validate_time_format(time):
+        await update.message.reply_text(
+            "❌ فرمت زمان اشتباهه! مثل 09:30 بفرست.\n\n"
+            "یا از دکمه‌ها انتخاب کن.",
+            reply_markup=get_time_selection_keyboard()
+        )
+        return SETTING_TIME
+    
+    # ذخیره در دیتابیس
     db = SessionLocal()
     try:
-        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not settings:
-            settings = UserSettings(user_id=user_id)
-            db.add(settings)
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == update.effective_user.id
+        ).first()
         
-        settings.send_to = dest_type
-        db.commit()
+        if settings:
+            settings.send_time = time
+            db.commit()
     finally:
         db.close()
     
-    if dest_type == "channel":
+    await update.message.reply_text(
+        f"✅ زمان {time} ذخیره شد!\n\n"
+        "حالا مقصد رو انتخاب کن:",
+        reply_markup=get_destination_keyboard()
+    )
+    
+    return CHOOSING_DESTINATION
+
+
+# ==================== Destination Selection ====================
+
+async def destination_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کاربر مقصد ارسال رو انتخاب کرده"""
+    query = update.callback_query
+    await query.answer()
+    
+    dest = query.data.replace('dest_', '')
+    
+    # ذخیره در دیتابیس
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == query.from_user.id
+        ).first()
+        
+        if settings:
+            settings.send_to = dest
+            if dest == 'private':
+                settings.channel_id = None
+            db.commit()
+    finally:
+        db.close()
+    
+    if dest == 'channel':
         await query.edit_message_text(
             text="کانال رو بفرست:\n\n"
                  "مثال: @my_channel یا -1001234567890\n\n"
