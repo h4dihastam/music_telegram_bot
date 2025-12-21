@@ -9,7 +9,7 @@ from telegram.constants import ParseMode
 
 from core.database import SessionLocal, SentTrack
 from services.spotify import spotify_service, get_random_track_for_user
-from services.musixmatch import get_track_lyrics
+from services.musixmatch import get_track_lyrics  # همون helper جدید
 from services.downloader import download_track_safe
 
 logger = logging.getLogger(__name__)
@@ -74,39 +74,50 @@ def format_track_message(
         
         if len(lyrics.split('\n')) > 4:
             message += "<i>...</i>\n"
+    
+    return message.strip()
+
+
+# ==================== ارسال روزانه ====================
+
+async def send_daily_music_to_all():
+    """
+    ارسال روزانه موزیک به تمام کاربران فعال
+    """
+    db = SessionLocal()
+    try:
+        from core.database import User, UserSettings, UserGenre
         
-        message += "\n"
-    
-    # پاورقی
-    message += "━━━━━━━━━━━━━━━━\n"
-    message += "🤖 ارسال شده توسط ربات موزیک\n"
-    message += "#موزیک_روزانه"
-    
-    return message
+        users = db.query(User).filter(User.is_active == True).all()
+        
+        for user in users:
+            settings = user.settings
+            if not settings:
+                continue
+            
+            genres = [g.genre for g in user.genres]
+            if not genres:
+                continue
+            
+            # انتخاب ژانر تصادفی اگر چندتا باشه
+            genre = random.choice(genres)
+            
+            # ارسال
+            await send_music_to_user(
+                bot=None,  # باید bot رو از scheduler بگیری
+                user_id=user.user_id,
+                genre=genre,
+                send_to=settings.send_to,
+                channel_id=settings.channel_id
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ خطا در ارسال روزانه: {e}")
+    finally:
+        db.close()
 
 
-def format_lyrics_full(track_info: dict, lyrics: str) -> str:
-    """
-    فرمت کردن متن کامل آهنگ برای ارسال جداگانه
-    
-    Args:
-        track_info: اطلاعات آهنگ
-        lyrics: متن کامل آهنگ
-    
-    Returns:
-        متن فرمت شده
-    """
-    message = f"📝 <b>متن کامل آهنگ</b>\n\n"
-    message += f"🎵 <b>{track_info['name']}</b>\n"
-    message += f"🎤 {track_info['artist_str']}\n\n"
-    message += "━━━━━━━━━━━━━━━━\n\n"
-    message += f"{lyrics}\n\n"
-    message += "━━━━━━━━━━━━━━━━\n"
-    
-    return message
-
-
-# ==================== ارسال موزیک ====================
+# ==================== ارسال به کاربر ====================
 
 async def send_music_to_user(
     bot: Bot,
@@ -117,165 +128,86 @@ async def send_music_to_user(
     download_file: bool = True
 ) -> bool:
     """
-    ارسال موزیک به کاربر یا کانال
+    ارسال یک موزیک به کاربر یا کانال
     
     Args:
         bot: نمونه Bot تلگرام
-        user_id: شناسه کاربر تلگرام
+        user_id: شناسه کاربر
         genre: ژانر موزیک
-        send_to: مقصد ارسال (private یا channel)
-        channel_id: شناسه کانال (اگه send_to=channel)
-        download_file: دانلود و ارسال فایل؟
+        send_to: 'private' یا 'channel'
+        channel_id: آیدی کانال اگر send_to=channel
+        download_file: آیا فایل کامل دانلود بشه یا نه
     
     Returns:
-        True اگه موفق بود
+        True اگر موفق، False اگر خطا
     """
     try:
-        logger.info(f"🎵 شروع ارسال موزیک برای کاربر {user_id} (ژانر: {genre})")
-        
-        # 1. پیدا کردن آهنگ تصادفی
+        # گرفتن آهنگ تصادفی
         track_info = get_random_track_for_user(user_id, genre)
-        
         if not track_info:
-            logger.error("❌ آهنگی پیدا نشد")
             await bot.send_message(
                 chat_id=user_id,
-                text="❌ متأسفانه آهنگ جدیدی پیدا نکردم!\n\n"
-                     "لطفاً بعداً دوباره امتحان کن."
+                text="❌ نتونستم آهنگ مناسبی پیدا کنم! بعداً امتحان کن."
             )
             return False
         
-        logger.info(f"✅ آهنگ انتخاب شد: {track_info['name']} - {track_info['artist_str']}")
+        # گرفتن متن آهنگ
+        lyrics = get_track_lyrics(track_info['name'], track_info['artist_str'])
         
-        # 2. گرفتن متن آهنگ
-        lyrics = None
-        try:
-            lyrics = get_track_lyrics(
-                track_info['name'],
-                track_info['artist_str'],
-                track_info['id'],
-                use_cache=True
-            )
-            if lyrics:
-                logger.info(f"✅ متن آهنگ دریافت شد ({len(lyrics)} کاراکتر)")
-        except Exception as e:
-            logger.warning(f"⚠️ خطا در دریافت متن: {e}")
-        
-        # 3. دانلود فایل (اختیاری)
-        audio_file = None
+        # دانلود فایل اگر لازم
+        audio = None
         if download_file:
-            try:
-                logger.info("📥 شروع دانلود فایل...")
-                audio_file = download_track_safe(
-                    track_info['name'],
-                    track_info['artist_str'],
-                    track_info
-                )
-                
-                if audio_file:
-                    logger.info(f"✅ فایل دانلود شد: {audio_file}")
-                else:
-                    logger.warning("⚠️ دانلود فایل ناموفق - فقط لینک ارسال می‌شه")
-                    
-            except Exception as e:
-                logger.error(f"❌ خطا در دانلود: {e}")
+            file_path = download_track_safe(track_info['name'], track_info['artist_str'])
+            if file_path:
+                audio = open(file_path, 'rb')
         
-        # 4. فرمت کردن پیام
-        message = format_track_message(track_info, lyrics, include_links=True)
+        # فرمت پیام
+        message_text = format_track_message(track_info, lyrics)
         
-        # 5. تعیین مقصد ارسال
-        target_chat = channel_id if send_to == 'channel' and channel_id else user_id
+        # تعیین chat_id
+        target_chat = channel_id if send_to == 'channel' else user_id
         
-        # 6. ارسال
-        try:
-            if audio_file:
-                # ارسال با فایل صوتی
-                with open(audio_file, 'rb') as audio:
-                    await bot.send_audio(
-                        chat_id=target_chat,
-                        audio=audio,
-                        caption=message,
-                        parse_mode=ParseMode.HTML,
-                        title=track_info['name'],
-                        performer=track_info['artist_str'],
-                        duration=track_info['duration_ms'] // 1000,
-                        thumb=track_info.get('cover_image')  # تصویر کاور
-                    )
-                
-                logger.info(f"✅ موزیک با فایل به {target_chat} ارسال شد")
-                
-                # حذف فایل بعد از ارسال
-                try:
-                    import os
-                    os.remove(audio_file)
-                    logger.info(f"🗑️ فایل حذف شد: {audio_file}")
-                except:
-                    pass
-                
-            else:
-                # ارسال بدون فایل (فقط لینک و اطلاعات)
-                # اگه تصویر کاور داشتیم، با عکس بفرست
-                if track_info.get('cover_image'):
-                    await bot.send_photo(
-                        chat_id=target_chat,
-                        photo=track_info['cover_image'],
-                        caption=message,
-                        parse_mode=ParseMode.HTML
-                    )
-                else:
-                    await bot.send_message(
-                        chat_id=target_chat,
-                        text=message,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=False
-                    )
-                
-                logger.info(f"✅ اطلاعات موزیک به {target_chat} ارسال شد")
-            
-            # 7. ارسال متن کامل آهنگ (اگه موجود بود)
-            if lyrics and len(lyrics) > 200:
-                lyrics_message = format_lyrics_full(track_info, lyrics)
-                
-                # بررسی طول پیام (حداکثر 4096 کاراکتر)
-                if len(lyrics_message) > 4000:
-                    # تقسیم به چند پیام
-                    parts = [lyrics_message[i:i+4000] for i in range(0, len(lyrics_message), 4000)]
-                    for part in parts:
-                        await bot.send_message(
-                            chat_id=target_chat,
-                            text=part,
-                            parse_mode=ParseMode.HTML
-                        )
-                else:
-                    await bot.send_message(
-                        chat_id=target_chat,
-                        text=lyrics_message,
-                        parse_mode=ParseMode.HTML
-                    )
-                
-                logger.info("✅ متن کامل آهنگ ارسال شد")
-            
-            # 8. ذخیره در تاریخچه
-            save_to_history(user_id, track_info)
-            
-            return True
-            
-        except TelegramError as e:
-            logger.error(f"❌ خطای تلگرام در ارسال: {e}")
-            
-            # اگه مشکل دسترسی به کانال بود، به کاربر اطلاع بده
-            if send_to == 'channel':
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=f"❌ نتونستم به کانال {channel_id} ارسال کنم!\n\n"
-                         f"لطفاً مطمئن شو که:\n"
-                         f"• من ادمین کانالم\n"
-                         f"• شناسه کانال درسته\n\n"
-                         f"برای تغییر تنظیمات از /menu استفاده کن."
-                )
-            
-            return False
-            
+        # ارسال
+        if audio:
+            await bot.send_audio(
+                chat_id=target_chat,
+                audio=audio,
+                caption=message_text,
+                parse_mode=ParseMode.HTML,
+                title=track_info['name'],
+                performer=track_info['artist_str']
+            )
+            audio.close()
+            if file_path:
+                os.remove(file_path)  # پاک کردن فایل موقت
+        else:
+            await bot.send_message(
+                chat_id=target_chat,
+                text=message_text,
+                parse_mode=ParseMode.HTML
+            )
+        
+        # ذخیره در تاریخچه
+        save_to_history(user_id, track_info)
+        
+        return True
+        
+    except TelegramError as e:
+        logger.error(f"❌ خطای تلگرام در ارسال: {e}")
+        
+        # اگه مشکل دسترسی به کانال بود، به کاربر اطلاع بده
+        if send_to == 'channel':
+            await bot.send_message(
+                chat_id=user_id,
+                text=f"❌ نتونستم به کانال {channel_id} ارسال کنم!\n\n"
+                     f"لطفاً مطمئن شو که:\n"
+                     f"• من ادمین کانالم\n"
+                     f"• شناسه کانال درسته\n\n"
+                     f"برای تغییر تنظیمات از /menu استفاده کن."
+            )
+        
+        return False
+        
     except Exception as e:
         logger.error(f"❌ خطای کلی در ارسال موزیک: {e}")
         
