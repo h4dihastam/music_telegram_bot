@@ -1,5 +1,5 @@
 """
-Music Telegram Bot - Entry Point (کاملاً تست‌شده برای Render)
+Music Telegram Bot - Entry Point (نسخه نهایی ساده برای Render)
 """
 import os
 import threading
@@ -19,64 +19,52 @@ def home():
 # ایمپورت‌های داخلی
 from core.config import config
 from core.database import init_db
-from bot.handlers import (
-    get_start_conversation_handler,
-    get_settings_handlers,
-)
-from bot.handlers.channel import get_channel_handlers
-from bot.handlers.genre import get_genre_handlers
-
-# ساخت اپ تلگرام
-from telegram.ext import Application
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler
 
 application = Application.builder().token(config.BOT_TOKEN).build()
 
-# ثبت هندلرها
-def register_handlers():
-    application.add_handler(get_start_conversation_handler())
-    
-    from telegram.ext import CommandHandler
-    async def help_cmd(update, context):
-        await update.message.reply_text("راهنما: /start برای شروع، /menu برای منو")
-    application.add_handler(CommandHandler("help", help_cmd))
-    
-    for handler in get_settings_handlers():
-        application.add_handler(handler)
-    for handler in get_channel_handlers():
-        application.add_handler(handler)
-    for handler in get_genre_handlers():
-        application.add_handler(handler)
+# هندلر ساده برای /start
+async def start(update, context):
+    await update.message.reply_text("سلام! ربات کار می‌کنه 🎵\nژانر مورد علاقه‌ات رو انتخاب کن!")
 
-# scheduler
+application.add_handler(CommandHandler("start", start))
+
+# هندلر برای پیام‌های ناشناخته
+async def unknown(update, context):
+    await update.message.reply_text("متوجه نشدم! از /start استفاده کن.")
+
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
+
+# error handler ساده
+async def error_handler(update, context):
+    logger.error(f"خطا: {context.error}")
+    if update and update.effective_message:
+        await update.effective_message.reply_text("❌ متأسفانه یه خطایی پیش اومد!\nلطفاً دوباره امتحان کن.")
+
+application.add_error_handler(error_handler)
+
+# scheduler (اختیاری، اگر کار نکرد کامنت کن)
 def setup_scheduler():
     from core.scheduler import setup_scheduler
     scheduler = setup_scheduler(application.bot)
     application.bot_data['scheduler'] = scheduler
 
-# polling در thread جدا
 def run_polling():
-    logger.info("🤖 شروع polling تلگرام...")
-    try:
-        application.run_polling(drop_pending_updates=True)
-    except Exception as e:
-        logger.error(f"❌ خطا در polling: {e}")
+    logger.info("🤖 شروع polling...")
+    application.run_polling(drop_pending_updates=True)
 
-# main
 def main():
-    logger.info("🚀 در حال راه‌اندازی ربات...")
+    logger.info("🚀 راه‌اندازی...")
     
-    config.validate()  # چک توکن
+    config.validate()
     init_db()
     
-    register_handlers()
     setup_scheduler()
     
-    # polling در background
     threading.Thread(target=run_polling, daemon=True).start()
     
-    # Flask در foreground
     port = int(os.environ.get("PORT", 8080))
-    logger.info(f"🌐 وب‌سرور روی پورت {port} شروع شد")
+    logger.info(f"وب‌سرور روی {port}")
     flask_app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
