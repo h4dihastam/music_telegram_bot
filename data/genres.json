@@ -1,0 +1,17 @@
+[
+    {"id": "pop", "name": "پاپ"},
+    {"id": "rock", "name": "راک"},
+    {"id": "hiphop", "name": "هیپ‌هاپ / رپ"},
+    {"id": "electronic", "name": "الکترونیک / دنس"},
+    {"id": "jazz", "name": "جاز"},
+    {"id": "classical", "name": "کلاسیک"},
+    {"id": "metal", "name": "متال"},
+    {"id": "country", "name": "کانتری"},
+    {"id": "rnb", "name": "آر‌اند‌بی"},
+    {"id": "reggae", "name": "رگه"},
+    {"id": "latin", "name": "لاتین"},
+    {"id": "kpop", "name": "کی‌پاپ"},
+    {"id": "indie", "name": "ایندی"},
+    {"id": "blues", "name": "بلوز"},
+    {"id": "folk", "name": "فولک"}
+]
