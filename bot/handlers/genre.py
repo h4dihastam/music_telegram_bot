@@ -13,6 +13,9 @@ from telegram.ext import ContextTypes, CallbackQueryHandler
 from core.database import SessionLocal, UserGenre
 from bot.keyboards.inline import get_back_to_menu_button
 
+# اضافه برای scheduler
+from core.scheduler import schedule_user_daily_music
+
 
 # مسیر فایل ژانرها
 GENRES_FILE = os.path.join(os.path.dirname(__file__), "../../data/genres.json")
@@ -50,71 +53,71 @@ def get_genres_keyboard(selected_genres=None):
     
     # دکمه تأیید و برگشت
     keyboard.append([
-        InlineKeyboardButton("✔️ تأیید و ادامه", callback_data="genre_confirm")
+        InlineKeyboardButton("✔️ تأیید و ذخیره", callback_data="genre_confirm")
     ])
     keyboard.append([
-        InlineKeyboardButton("🔙 برگشت", callback_data="menu_back")
+        InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu_back")
     ])
-    
+
     return InlineKeyboardMarkup(keyboard)
 
 
 async def show_genre_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=True):
-    """نمایش منوی انتخاب ژانر"""
+    """نمایش کیبورد انتخاب ژانر"""
+    query = update.callback_query if edit else None
     user_id = update.effective_user.id
-    
-    # گرفتن ژانرهای فعلی کاربر
+
     db = SessionLocal()
     try:
-        current_genres = {
-            ug.genre for ug in db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
-        }
+        current_genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
+        selected = set(g.genre for g in current_genres)
     finally:
         db.close()
-    
-    # ذخیره در context برای استفاده بعدی
-    if 'selected_genres' not in context.user_data:
-        context.user_data['selected_genres'] = current_genres.copy()
-    
-    keyboard = get_genres_keyboard(context.user_data['selected_genres'])
-    
-    text = "🎵 ژانرهای مورد علاقه‌ات رو انتخاب کن:\n\nمی‌تونی چندتا انتخاب کنی!\n(دوباره بزن تا لغو بشه)"
 
-    if update.callback_query and edit:
-        query = update.callback_query
+    context.user_data['selected_genres'] = selected
+
+    text = "🎵 ژانرهای مورد علاقه‌ات رو انتخاب کن (چندتایی OK!):\n\n" \
+           "روی هر کدوم کلیک کن تا انتخاب/لغو بشه."
+
+    if query:
         await query.answer()
-        await query.edit_message_text(text=text, reply_markup=keyboard)
+        await query.edit_message_text(
+            text=text,
+            reply_markup=get_genres_keyboard(selected)
+        )
     else:
-        await update.message.reply_text(text=text, reply_markup=keyboard)
+        await update.message.reply_text(
+            text=text,
+            reply_markup=get_genres_keyboard(selected)
+        )
 
 
 async def handle_genre_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت کلیک روی ژانرها و تأیید"""
     query = update.callback_query
     await query.answer()
-    
+
     data = query.data
-    user_id = update.effective_user.id
-    
-    # گرفتن مجموعه فعلی از context
-    selected = context.user_data.get('selected_genres', set())
-    
+
     if data.startswith("genre_select_"):
-        genre_id = data.replace("genre_select_", "")
-        
+        genre_id = data.split("_")[-1]
+
+        selected = context.user_data.get('selected_genres', set())
+
         if genre_id in selected:
             selected.remove(genre_id)
         else:
             selected.add(genre_id)
-        
+
         context.user_data['selected_genres'] = selected
-        
-        # بروزرسانی کیبورد
-        keyboard = get_genres_keyboard(selected)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
-        
+
+        await query.edit_message_reply_markup(
+            reply_markup=get_genres_keyboard(selected)
+        )
+
     elif data == "genre_confirm":
-        # تأیید نهایی و ذخیره در دیتابیس
+        selected = context.user_data.get('selected_genres', set())
+        user_id = update.effective_user.id
+
         db = SessionLocal()
         try:
             # حذف قبلی‌ها
@@ -125,6 +128,9 @@ async def handle_genre_selection(update: Update, context: ContextTypes.DEFAULT_T
                 db.add(UserGenre(user_id=user_id, genre=genre_id))
             
             db.commit()
+
+            # اضافه کردن/بروزرسانی job روزانه بعد از ذخیره ژانر
+            schedule_user_daily_music(user_id)
         finally:
             db.close()
         
@@ -141,9 +147,6 @@ async def handle_genre_selection(update: Update, context: ContextTypes.DEFAULT_T
                  f"هر روز بر اساس این سلیقه برات موزیک میفرستم 🎶",
             reply_markup=get_back_to_menu_button()
         )
-        
-        # اگر در فرآیند /start بودی، می‌تونی به مرحله بعدی بری
-        # (اینجا فقط برگشت به منو داریم)
 
 
 # ==================== Handler Registration ====================
@@ -153,7 +156,7 @@ def get_genre_handlers():
     return [
         CallbackQueryHandler(
             show_genre_selection,
-            pattern=r'^menu_change_genre$'  # از منوی تنظیمات
+            pattern=r'^menu_change_genre$'
         ),
         CallbackQueryHandler(
             handle_genre_selection,

@@ -21,6 +21,9 @@ from bot.keyboards.inline import (
 from bot.handlers.genre import show_genre_selection, handle_genre_selection
 from bot.states import CHOOSING_GENRE, SETTING_TIME, CHOOSING_DESTINATION, SETTING_CHANNEL
 
+# اضافه برای scheduler
+from core.scheduler import schedule_user_daily_music
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /start"""
@@ -59,68 +62,59 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data.startswith("time_"):
         if data == "time_custom":
             await query.edit_message_text(
-                text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست\n\n"
-                     "مثال: 09:00 یا 14:30",
-                reply_markup=None
+                text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست (مثل 09:30):"
             )
             return SETTING_TIME
-        else:
-            # زمان از پیش تعریف شده
-            time_str = data.replace("time_", "")
-            context.user_data['selected_time'] = time_str
-            
-            # ذخیره در دیتابیس
-            user_id = update.effective_user.id
-            db = SessionLocal()
-            try:
-                settings = db.query(UserSettings).filter(
-                    UserSettings.user_id == user_id
-                ).first()
-                if settings:
-                    settings.send_time = time_str
-                    db.commit()
-            finally:
-                db.close()
-            
-            await query.edit_message_text(
-                text=f"✅ زمان ارسال: {time_str}\n\n"
-                     "حالا مقصد ارسال رو انتخاب کن:",
-                reply_markup=get_destination_keyboard()
-            )
-            return CHOOSING_DESTINATION
+        
+        send_time = data.split("_")[1]
+        
+        user_id = update.effective_user.id
+        
+        db = SessionLocal()
+        try:
+            settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            if settings:
+                settings.send_time = send_time
+                db.commit()
+                
+                # اضافه کردن/بروزرسانی job روزانه
+                schedule_user_daily_music(user_id)
+        finally:
+            db.close()
+        
+        await query.edit_message_text(
+            text=f"✅ زمان ارسال به {send_time} تنظیم شد!\n\n"
+                 "حالا کجا بفرستم؟",
+            reply_markup=get_destination_keyboard()
+        )
+        return CHOOSING_DESTINATION
 
 
 async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت زمان دستی از کاربر"""
+    """مدیریت زمان سفارشی"""
     time_str = update.message.text.strip()
     
-    # اعتبارسنجی فرمت
-    if not re.match(r'^([01]\d|2[0-3]):([0-5]\d)$', time_str):
-        await update.message.reply_text(
-            "❌ فرمت زمان اشتباهه!\n\n"
-            "باید به صورت HH:MM باشه (مثل 09:00 یا 14:30)\n"
-            "دوباره بفرست:"
-        )
+    if not validate_time_format(time_str):
+        await update.message.reply_text("❌ فرمت اشتباه! HH:MM وارد کن (مثل 09:30)")
         return SETTING_TIME
     
-    context.user_data['selected_time'] = time_str
-    
-    # ذخیره در دیتابیس
     user_id = update.effective_user.id
+    
     db = SessionLocal()
     try:
-        settings = db.query(UserSettings).filter(
-            UserSettings.user_id == user_id
-        ).first()
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if settings:
             settings.send_time = time_str
             db.commit()
+            
+            # اضافه کردن/بروزرسانی job روزانه
+            schedule_user_daily_music(user_id)
     finally:
         db.close()
     
     await update.message.reply_text(
-        text=f"✅ زمان ارسال: {time_str}\n\n"
-             "حالا مقصد ارسال رو انتخاب کن:",
+        text=f"✅ زمان ارسال به {time_str} تنظیم شد!\n\n"
+             "حالا کجا بفرستم؟",
         reply_markup=get_destination_keyboard()
     )
     return CHOOSING_DESTINATION
@@ -134,118 +128,91 @@ async def destination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     data = query.data
     user_id = update.effective_user.id
     
-    if data == "dest_private":
-        # ذخیره در دیتابیس
-        db = SessionLocal()
-        try:
-            settings = db.query(UserSettings).filter(
-                UserSettings.user_id == user_id
-            ).first()
-            if settings:
-                settings.send_to = "private"
-                settings.channel_id = None
-                db.commit()
-                
-                # به‌روزرسانی scheduler
-                scheduler = context.bot_data.get('scheduler')
-                if scheduler:
-                    scheduler.add_user_job(user_id, settings.send_time, settings.timezone)
-        finally:
-            db.close()
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not settings:
+            await query.edit_message_text("❌ تنظیمات پیدا نشد!")
+            return
         
-        await query.edit_message_text(
-            text="✅ تنظیمات با موفقیت ذخیره شد!\n\n"
-                 "🎵 هر روز یه آهنگ جدید میگیری!\n\n"
-                 "از منو می‌تونی تنظیمات رو تغییر بدی 👇",
-            reply_markup=get_main_menu_keyboard()
-        )
-        return ConversationHandler.END
-    
-    elif data == "dest_channel":
-        await query.edit_message_text(
-            text="📢 خوبه! حالا آیدی کانال رو برام بفرست:\n\n"
-                 "مثال:\n"
-                 "• @my_music_channel\n"
-                 "• -1001234567890\n\n"
-                 "⚠️ مهم: من باید **ادمین** کانال باشم تا بتونم موزیک بفرستم!",
-            reply_markup=None
-        )
-        return SETTING_CHANNEL
+        if data == "dest_private":
+            settings.send_to = "private"
+            settings.channel_id = None
+            db.commit()
+            
+            # اضافه کردن/بروزرسانی job روزانه
+            schedule_user_daily_music(user_id)
+            
+            await query.edit_message_text(
+                text="✅ مقصد به پیوی (خصوصی) تنظیم شد!\n\n"
+                     "تنظیمات کامل شد. /menu برای منو.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return ConversationHandler.END
+        
+        elif data == "dest_channel":
+            await choose_channel_destination(update, context)
+            return SETTING_CHANNEL
+    finally:
+        db.close()
 
 
 async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت و بررسی آیدی کانال"""
-    from telegram.error import BadRequest, Forbidden, TelegramError
-    
+    """handler برای دریافت آیدی کانال (از channel.py ادغام‌شده)"""
     channel_input = update.message.text.strip()
-    user_id = update.effective_user.id
-    bot = context.bot
     
-    # اعتبارسنجی فرمت
-    if not (channel_input.startswith('@') or (channel_input.startswith('-') and channel_input[1:].isdigit())):
-        await update.message.reply_text(
-            "❌ فرمت آیدی کانال اشتباهه!\n\n"
-            "باید با @ شروع بشه یا آیدی عددی باشه (مثل -1001234567890)\n"
-            "دوباره بفرست:"
-        )
-        return SETTING_CHANNEL
+    user_id = update.effective_user.id
     
     try:
         if channel_input.startswith('@'):
-            chat = await bot.get_chat(channel_input)
-            chat_id = chat.id
+            chat_id = channel_input
         else:
             chat_id = int(channel_input)
-            chat = await bot.get_chat(chat_id)
-        
-        # چک کردن ادمین بودن ربات
-        chat_member = await bot.get_chat_member(chat_id, bot.id)
-        if chat_member.status not in ('administrator', 'creator'):
+
+        chat = await context.bot.get_chat(chat_id)
+
+        admins = await context.bot.get_chat_administrators(chat_id)
+        bot_is_admin = any(admin.user.id == context.bot.id for admin in admins)
+
+        if not bot_is_admin:
             await update.message.reply_text(
-                "⚠️ من در این کانال ادمین نیستم!\n\n"
-                "لطفاً من رو ادمین کن (با مجوز 'ارسال پیام') و دوباره آیدی رو بفرست."
+                "⚠️ من ادمین کانال نیستم! اول منو ادمین کن بعد دوباره امتحان کن.",
+                reply_markup=get_back_to_menu_button()
             )
             return SETTING_CHANNEL
-        
-        # ذخیره در دیتابیس
+
+        display_id = f"@{chat.username}" if chat.username else str(chat_id)
+
         db = SessionLocal()
-        try:
-            settings = db.query(UserSettings).filter(
-                UserSettings.user_id == user_id
-            ).first()
-            if settings:
-                settings.send_to = "channel"
-                settings.channel_id = str(chat_id)
-                db.commit()
-                
-                # به‌روزرسانی scheduler
-                scheduler = context.bot_data.get('scheduler')
-                if scheduler:
-                    scheduler.add_user_job(user_id, settings.send_time, settings.timezone)
-        finally:
-            db.close()
-        
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if settings:
+            settings.send_to = "channel"
+            settings.channel_id = str(chat_id)
+            db.commit()
+            
+            # اضافه کردن/بروزرسانی job روزانه
+            schedule_user_daily_music(user_id)
+        db.close()
+
         await update.message.reply_text(
             f"✅ عالی! کانال با موفقیت تنظیم شد:\n\n"
-            f"📢 {chat.title if hasattr(chat, 'title') else channel_input}\n\n"
-            f"از فردا هر روز موزیک تو این کانال میاد! 🎵",
+            f"📢 {chat.title if hasattr(chat, 'title') else display_id}\n"
+            f"🆔 {display_id}\n\n"
+            f"تنظیمات کامل شد. /menu برای منو.",
             reply_markup=get_main_menu_keyboard()
         )
+
+        if 'pending_destination' in context.user_data:
+            del context.user_data['pending_destination']
+
         return ConversationHandler.END
-        
-    except (BadRequest, ValueError):
+
+    except (TelegramError, ValueError) as e:
         await update.message.reply_text(
-            "❌ کانال پیدا نشد! آیدی رو درست چک کن و دوباره بفرست."
+            f"❌ خطا: {str(e)}\n\n"
+            "آیدی کانال رو درست وارد کن و مطمئن شو من ادمینم!",
+            reply_markup=get_back_to_menu_button()
         )
-        return SETTING_CHANNEL
-    except Forbidden:
-        await update.message.reply_text(
-            "🚫 من به این کانال دسترسی ندارم!\n\n"
-            "لطفاً اول من رو به کانال اضافه کن و ادمین کن."
-        )
-        return SETTING_CHANNEL
-    except TelegramError as e:
-        await update.message.reply_text(f"❌ خطا: {str(e)}\nدوباره تلاش کن.")
         return SETTING_CHANNEL
 
 

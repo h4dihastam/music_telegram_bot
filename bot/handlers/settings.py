@@ -10,11 +10,12 @@ from bot.keyboards.inline import (
     get_time_selection_keyboard,
     get_destination_keyboard
 )
-from bot.handlers.genre import show_genre_selection, handle_genre_selection  # برای تغییر ژانر
-from bot.handlers.channel import get_channel_handlers  # اگر نیاز باشه
+from bot.handlers.genre import show_genre_selection
+from utils.helpers import validate_time_format
 import random
+import logging
 
-# ایمپورت برای scheduler (برای اضافه کردن job بعد از ذخیره تنظیمات)
+# اضافه برای scheduler
 from core.scheduler import schedule_user_daily_music
 
 logger = logging.getLogger(__name__)
@@ -43,16 +44,11 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     
-    # دریافت اطلاعات از دیتابیس
     db = SessionLocal()
     try:
-        settings = db.query(UserSettings).filter(
-            UserSettings.user_id == user_id
-        ).first()
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         
-        genres = db.query(UserGenre).filter(
-            UserGenre.user_id == user_id
-        ).all()
+        genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
         
         if not settings:
             await query.edit_message_text(
@@ -95,12 +91,14 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             text="⏰ زمان ارسال روزانه رو انتخاب کن:",
             reply_markup=get_time_selection_keyboard()
         )
+        context.user_data['changing_time'] = True  # برای state اگر نیاز باشه
         
     elif data == "menu_change_dest":
         await query.edit_message_text(
             text="📍 کجا موزیک‌ها رو بفرستم؟",
             reply_markup=get_destination_keyboard()
         )
+        context.user_data['changing_dest'] = True
         
     elif data == "menu_status":
         await show_status(update, context)
@@ -112,36 +110,69 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await show_menu(update, context)
 
 
-# handler برای تغییر زمان (مثال - بسته به کد کاملت)
 async def change_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... کد تغییر زمان (فرض کنیم زمان ذخیره می‌شه)
+    """handler برای تغییر زمان (از کیبورد یا custom)"""
+    query = update.callback_query
+    await query.answer()
     
+    data = query.data
     user_id = update.effective_user.id
+    
     db = SessionLocal()
     try:
-        # ذخیره زمان جدید
-        # settings.send_time = new_time
-        db.commit()
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not settings:
+            await query.edit_message_text("❌ تنظیمات پیدا نشد!")
+            return
         
-        # اضافه کردن/بروزرسانی job روزانه
-        schedule_user_daily_music(user_id)
+        if data.startswith("time_"):
+            send_time = data.split("_")[1]
+            settings.send_time = send_time
+            db.commit()
+            
+            # اضافه کردن/بروزرسانی job روزانه
+            schedule_user_daily_music(user_id)
+            
+            await query.edit_message_text(
+                text=f"✅ زمان ارسال به {send_time} تغییر کرد!",
+                reply_markup=get_main_menu_keyboard()
+            )
     finally:
         db.close()
 
 
-# handler برای تغییر مقصد (مثال)
 async def change_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... کد تغییر مقصد
+    """handler برای تغییر مقصد"""
+    query = update.callback_query
+    await query.answer()
     
+    data = query.data
     user_id = update.effective_user.id
+    
     db = SessionLocal()
     try:
-        # ذخیره مقصد جدید
-        # settings.send_to = new_dest
-        db.commit()
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not settings:
+            await query.edit_message_text("❌ تنظیمات پیدا نشد!")
+            return
         
-        # اضافه کردن/بروزرسانی job روزانه
-        schedule_user_daily_music(user_id)
+        if data == "dest_private":
+            settings.send_to = "private"
+            settings.channel_id = None
+            db.commit()
+            
+            # اضافه کردن/بروزرسانی job روزانه
+            schedule_user_daily_music(user_id)
+            
+            await query.edit_message_text(
+                text="✅ مقصد به پیوی تغییر کرد!",
+                reply_markup=get_main_menu_keyboard()
+            )
+        
+        elif data == "dest_channel":
+            # برو به handler کانال
+            from .channel import choose_channel_destination
+            await choose_channel_destination(update, context)
     finally:
         db.close()
 
@@ -204,7 +235,6 @@ def get_settings_handlers():
     """لیست تمام handler های مربوط به تنظیمات"""
     return [
         CallbackQueryHandler(menu_callback_handler, pattern=r'^menu_'),
-        # اگر handler جدا برای change_time یا change_dest داری، اضافه کن
-        # CallbackQueryHandler(change_time_handler, pattern=r'^time_'),
-        # CallbackQueryHandler(change_dest_handler, pattern=r'^dest_'),
+        CallbackQueryHandler(change_time_handler, pattern=r'^time_'),
+        CallbackQueryHandler(change_dest_handler, pattern=r'^dest_'),
     ]
