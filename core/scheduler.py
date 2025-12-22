@@ -1,5 +1,5 @@
 """
-Scheduler برای ارسال خودکار روزانه موزیک (با JobQueue تلگرام)
+Scheduler برای ارسال خودکار روزانه موزیک (با JobQueue تلگرام - نسخه نهایی بدون load_all_jobs)
 """
 import logging
 from datetime import datetime, timedelta
@@ -9,7 +9,7 @@ from telegram.ext import JobQueue
 from telegram import Bot
 from telegram.error import TelegramError
 
-from core.database import SessionLocal, User, UserSettings, UserGenre
+from core.database import SessionLocal, UserGenre, UserSettings
 from core.config import config
 from services.music_sender import send_music_to_user
 
@@ -24,28 +24,25 @@ class MusicScheduler:
         logger.info("✅ Scheduler با JobQueue راه‌اندازی شد")
     
     def start(self):
-        """شروع scheduler - JobQueue خودش با app شروع می‌شه"""
-        self.load_all_jobs()
-        logger.info("✅ Scheduler شروع به کار کرد")
-    
-    def shutdown(self):
-        """خاموش کردن - JobQueue با app shutdown می‌شه"""
-        pass  # نیازی نیست، تلگرام مدیریت می‌کنه
-    
-    def add_user_job(
+        # دیگه load_all_jobs نداریم — jobها موقع ذخیره تنظیمات کاربر اضافه می‌شن
+        logger.info("✅ Scheduler شروع به کار کرد (jobها موقع تنظیم کاربر اضافه می‌شن)")
+
+    def add_or_update_user_job(
         self,
         user_id: int,
         send_time: str,
         timezone: str = 'Asia/Tehran'
     ):
         """
-        اضافه کردن job برای یک کاربر
+        اضافه یا به‌روزرسانی job برای یک کاربر
+        این تابع رو از handlerهای تنظیمات صدا بزن (مثل بعد از ذخیره زمان یا ژانر)
         """
         try:
             hour, minute = map(int, send_time.split(':'))
             
             job_id = f'user_{user_id}'
-            # حذف job قبلی
+            
+            # حذف job قبلی اگر وجود داشت
             existing_jobs = self.job_queue.get_jobs_by_name(job_id)
             for job in existing_jobs:
                 job.schedule_removal()
@@ -54,25 +51,24 @@ class MusicScheduler:
             tz = pytz.timezone(timezone)
             now = datetime.now(tz)
             run_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if run_time < now:
+            if run_time <= now:
                 run_time += timedelta(days=1)
             
             # اضافه کردن job روزانه
             self.job_queue.run_daily(
                 callback=self.send_daily_music,
                 time=run_time.time(),
-                days=(0, 1, 2, 3, 4, 5, 6),  # هر روز
+                days=(0, 1, 2, 3, 4, 5, 6),
                 name=job_id,
                 data=user_id,
-                chat_id=None,  # نیازی نیست
                 tzinfo=tz
             )
             
-            logger.info(f"✅ Job برای کاربر {user_id} اضافه شد در {send_time}")
+            logger.info(f"✅ Job روزانه برای کاربر {user_id} در {send_time} ({timezone}) اضافه/به‌روزرسانی شد")
             
-        except ValueError as e:
-            logger.error(f"❌ خطا در پارس زمان برای کاربر {user_id}: {e}")
-    
+        except Exception as e:
+            logger.error(f"❌ خطا در اضافه کردن job برای کاربر {user_id}: {e}")
+
     async def send_daily_music(self, context):
         """تابع callback برای ارسال روزانه"""
         user_id = context.job.data
@@ -86,9 +82,14 @@ class MusicScheduler:
                 return
             
             genre = random.choice([g.genre for g in genres])
+            
             settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-            send_to = settings.send_to if settings else 'private'
-            channel_id = settings.channel_id if settings else None
+            if not settings:
+                logger.warning(f"⚠️ تنظیمات برای کاربر {user_id} پیدا نشد")
+                return
+            
+            send_to = settings.send_to
+            channel_id = settings.channel_id if send_to == 'channel' else None
             
             success = await send_music_to_user(
                 bot=context.bot,
@@ -100,37 +101,15 @@ class MusicScheduler:
             )
             
             if success:
-                logger.info(f"✅ موزیک ارسال شد برای {user_id}")
+                logger.info(f"✅ موزیک روزانه ارسال شد برای {user_id}")
             else:
-                logger.warning(f"⚠️ ارسال ناموفق برای {user_id}")
+                logger.warning(f"⚠️ ارسال روزانه ناموفق برای {user_id}")
                 
-        except TelegramError as e:
-            logger.error(f"❌ خطا در ارسال تلگرام: {e}")
-        finally:
-            db.close()
-    
-    def load_all_jobs(self):
-        """بارگذاری تمام jobها از دیتابیس"""
-        db = SessionLocal()
-        try:
-            users = db.query(User).filter(User.is_active == True).all()
-            loaded = 0
-            
-            for user in users:
-                if user.settings and user.settings.send_time:
-                    self.add_user_job(
-                        user.user_id,
-                        user.settings.send_time,
-                        user.settings.timezone
-                    )
-                    loaded += 1
-            
-            logger.info(f"✅ {loaded} job از دیتابیس بارگذاری شد")
-            
         except Exception as e:
-            logger.error(f"❌ خطا در بارگذاری jobs: {e}")
+            logger.error(f"❌ خطا در ارسال روزانه برای {user_id}: {e}")
         finally:
             db.close()
+
 
 # ==================== Helper Functions ====================
 
@@ -138,3 +117,28 @@ def setup_scheduler(job_queue: JobQueue) -> MusicScheduler:
     scheduler = MusicScheduler(job_queue)
     scheduler.start()
     return scheduler
+
+
+# تابع کمکی برای استفاده در handlerها
+def schedule_user_daily_music(user_id: int):
+    """
+    این تابع رو در handlerهایی که تنظیمات کاربر ذخیره می‌شه صدا بزن
+    مثلاً بعد از ذخیره زمان یا ژانر در /start یا settings
+    """
+    from core.database import SessionLocal, UserSettings
+    
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if settings and settings.send_time:
+            from core.scheduler import setup_scheduler
+            from telegram.ext import Application
+            app = Application.builder().token(config.BOT_TOKEN).build()  # موقت برای دسترسی به job_queue
+            scheduler = setup_scheduler(app.job_queue)
+            scheduler.add_or_update_user_job(
+                user_id=user_id,
+                send_time=settings.send_time,
+                timezone=settings.timezone or 'Asia/Tehran'
+            )
+    finally:
+        db.close()
