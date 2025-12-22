@@ -5,8 +5,7 @@ import logging
 from datetime import datetime, timedelta
 import random
 import pytz
-from telegram.ext import JobQueue
-from telegram import Bot
+from telegram.ext import JobQueue, ContextTypes
 from telegram.error import TelegramError
 
 from core.database import SessionLocal, UserGenre, UserSettings
@@ -69,7 +68,7 @@ class MusicScheduler:
         except Exception as e:
             logger.error(f"❌ خطا در اضافه کردن job برای کاربر {user_id}: {e}")
 
-    async def send_daily_music(self, context):
+    async def send_daily_music(self, context: ContextTypes.DEFAULT_TYPE):
         """تابع callback برای ارسال روزانه"""
         user_id = context.job.data
         logger.info(f"📤 ارسال روزانه موزیک برای کاربر {user_id}")
@@ -119,11 +118,11 @@ def setup_scheduler(job_queue: JobQueue) -> MusicScheduler:
     return scheduler
 
 
-# تابع کمکی برای استفاده در handlerها
-def schedule_user_daily_music(user_id: int):
+# تابع کمکی برای استفاده در handlerها (context رو بگیره تا job_queue از app بگیریم)
+def schedule_user_daily_music(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     """
     این تابع رو در handlerهایی که تنظیمات کاربر ذخیره می‌شه صدا بزن
-    مثلاً بعد از ذخیره زمان یا ژانر در /start یا settings
+    مثلاً بعد از db.commit در ذخیره زمان یا ژانر
     """
     from core.database import SessionLocal, UserSettings
     
@@ -131,10 +130,9 @@ def schedule_user_daily_music(user_id: int):
     try:
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if settings and settings.send_time:
-            from core.scheduler import setup_scheduler
-            from telegram.ext import Application
-            app = Application.builder().token(config.BOT_TOKEN).build()  # موقت برای دسترسی به job_queue
-            scheduler = setup_scheduler(app.job_queue)
+            # دسترسی به job_queue از context
+            job_queue = context.application.job_queue
+            scheduler = setup_scheduler(job_queue)
             scheduler.add_or_update_user_job(
                 user_id=user_id,
                 send_time=settings.send_time,

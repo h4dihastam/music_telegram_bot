@@ -1,5 +1,5 @@
 """
-ربات موزیک تلگرام - نقطه ورود اصلی (نسخه نهایی پایدار برای Render.com)
+ربات موزیک تلگرام - نقطه ورود اصلی (نسخه نهایی پایدار برای Render.com - بدون post_init)
 """
 import logging
 import traceback
@@ -7,8 +7,7 @@ import sys
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
-    Defaults,
-    ContextTypes
+    Defaults
 )
 import pytz
 
@@ -26,21 +25,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: Update, context):
     """مدیریت خطاهای غیرمنتظره"""
     logger.error("❌ خطای داخلی ربات:", exc_info=context.error)
     if update and update.effective_message:
         await update.effective_message.reply_text(
             "❌ متأسفانه مشکلی در پردازش پیش آمد. لطفاً دوباره تلاش کنید."
         )
-
-
-# تابع post_init برای راه‌اندازی scheduler بعد از شروع کامل اپ
-async def post_init(application):
-    """راه‌اندازی scheduler بعد از شروع کامل اپلیکیشن"""
-    logger.info("راه‌اندازی scheduler بعد از شروع اپلیکیشن...")
-    scheduler = setup_scheduler(application.job_queue)
-    application.bot_data['scheduler'] = scheduler
 
 
 async def main():
@@ -53,14 +44,8 @@ async def main():
         # ۲. تنظیمات پیش‌فرض
         defaults = Defaults(tzinfo=pytz.timezone(Config.DEFAULT_TIMEZONE))
 
-        # ۳. ساخت اپلیکیشن با post_init
-        app = (
-            ApplicationBuilder()
-            .token(Config.BOT_TOKEN)
-            .defaults(defaults)
-            .post_init(post_init)  # این کلید حل مشکل هست!
-            .build()
-        )
+        # ۳. ساخت اپلیکیشن
+        app = ApplicationBuilder().token(Config.BOT_TOKEN).defaults(defaults).build()
 
         # ۴. اضافه کردن هندلرها
         app.add_handler(get_start_conversation_handler())
@@ -72,7 +57,15 @@ async def main():
 
         logger.info("✅ ربات آنلاین شد!")
 
-        # ۵. شروع polling - ساده و بدون دستی initialize/start
+        # ۵. شروع اپلیکیشن (initialize و start)
+        await app.initialize()
+        await app.start()
+
+        # ۶. راه‌اندازی scheduler (بدون load_all_jobs — jobها موقع ذخیره تنظیمات اضافه می‌شن)
+        scheduler = setup_scheduler(app.job_queue)
+        app.bot_data['scheduler'] = scheduler
+
+        # ۷. شروع polling - این خط بلوکه می‌کنه و ربات رو زنده نگه می‌داره
         await app.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
@@ -81,6 +74,13 @@ async def main():
     except Exception as e:
         logger.error(f"❌ خطای بحرانی در متد اصلی: {e}")
         logger.error(traceback.format_exc())
+    finally:
+        if 'app' in locals():
+            try:
+                await app.stop()
+                await app.shutdown()
+            except Exception as shutdown_error:
+                logger.error(f"خطا در shutdown: {shutdown_error}")
 
 
 if __name__ == '__main__':
