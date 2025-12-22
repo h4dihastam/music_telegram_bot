@@ -1,86 +1,172 @@
 #!/usr/bin/env python3
-import asyncio
+"""
+ربات موزیک تلگرام - نقطه ورود اصلی
+"""
 import logging
-import os
-import signal
-from telegram.ext import Application
+import sys
+from telegram import Update
+from telegram.ext import Application, CommandHandler
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+from core.config import config
+from core.database import init_db
+from core.scheduler import setup_scheduler
+from bot.handlers import get_start_conversation_handler, get_settings_handlers
+
+# تنظیم logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
-TOKEN = os.environ.get("BOT_TOKEN")  # set this in Render env vars
 
-async def _async_start(app: Application):
-    # REGISTER HANDLERS HERE (قبل از start)
-    # from bot.handlers import register_handlers
-    # register_handlers(app)
-
-    # temporary debug: detect ellipsis placeholders early
-    for groups in app.handlers.values():
-        for g in groups:
-            if isinstance(g, (list, tuple)):
-                for h in g:
-                    if h is ...:
-                        raise RuntimeError("Found ellipsis (...) in handler registration — remove it")
-            else:
-                if g is ...:
-                    raise RuntimeError("Found ellipsis (...) in handler registration — remove it")
-
-    # remove webhook (safe) before polling
+async def error_handler(update: Update, context):
+    """مدیریت خطاها"""
+    logger.error("❌ خطا رخ داد!", exc_info=context.error)
+    
     try:
-        await app.bot.delete_webhook()
-    except Exception:
-        pass
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "❌ متأسفانه یه خطایی پیش اومد!\n"
+                "لطفاً دوباره امتحان کن یا /start بزن."
+            )
+    except Exception as e:
+        logger.error(f"خطا در ارسال پیام خطا: {e}")
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    logger.info("Bot started (async mode)")
 
-    stop_event = asyncio.Event()
+async def menu_command(update: Update, context):
+    """دستور /menu"""
+    from bot.handlers.settings import show_menu
+    await show_menu(update, context)
+
+
+async def help_command(update: Update, context):
+    """دستور /help"""
+    help_text = """
+🎵 **راهنمای ربات موزیک روزانه**
+
+📋 **دستورات:**
+/start - شروع و تنظیمات اولیه
+/menu - منوی اصلی و تنظیمات
+/status - نمایش وضعیت فعلی
+/help - نمایش این راهنما
+
+🎯 **قابلیت‌ها:**
+✅ انتخاب ژانر موسیقی
+✅ ارسال خودکار روزانه
+✅ ارسال به پیوی یا کانال
+✅ دریافت متن آهنگ
+✅ دانلود فایل MP3
+
+💡 **نکات:**
+• هر روز در زمان انتخابی یک آهنگ جدید دریافت می‌کنی
+• می‌تونی چندین ژانر انتخاب کنی
+• برای ارسال به کانال، ربات باید ادمین کانال باشه
+
+❓ مشکلی داری؟ با /start دوباره تنظیم کن!
+    """
+    await update.message.reply_text(help_text)
+
+
+async def status_command(update: Update, context):
+    """دستور /status"""
+    from bot.handlers.settings import show_status
+    from core.database import SessionLocal, UserSettings
+    
+    user_id = update.effective_user.id
+    
+    db = SessionLocal()
     try:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except NotImplementedError:
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == user_id
+        ).first()
+        
+        if not settings:
+            await update.message.reply_text(
+                "❌ هنوز تنظیماتی ثبت نکردی!\n\n"
+                "از /start استفاده کن تا شروع کنیم."
+            )
+            return
+        
+        # ساخت fake query برای استفاده از show_status
+        class FakeQuery:
+            async def answer(self): 
                 pass
-    except RuntimeError:
-        pass
-
-    try:
-        await stop_event.wait()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        pass
+            async def edit_message_text(self, **kwargs):
+                await update.message.reply_text(**kwargs)
+        
+        update.callback_query = FakeQuery()
+        await show_status(update, context)
     finally:
-        logger.info("Shutting down bot...")
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
-        logger.info("Bot shutdown complete")
+        db.close()
 
-async def run_app():
-    if not TOKEN:
-        logger.error("BOT_TOKEN not set in environment")
-        return
-    app = Application.builder().token(TOKEN).build()
-    # register handlers here
-    # from bot.handlers import register_handlers
-    # register_handlers(app)
-    await _async_start(app)
 
 def main():
+    """راه‌اندازی ربات"""
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
+        logger.info("🚀 راه‌اندازی ربات...")
+        
+        # بررسی تنظیمات
+        config.validate()
+        
+        # بررسی توکن
+        if not config.BOT_TOKEN:
+            logger.error("❌ BOT_TOKEN در environment variables موجود نیست!")
+            logger.error("لطفاً در Render Dashboard این متغیر رو اضافه کن")
+            sys.exit(1)
+        
+        # راه‌اندازی دیتابیس
+        logger.info("🗄️ راه‌اندازی دیتابیس...")
+        init_db()
+        
+        # ساخت Application
+        logger.info("🤖 ساخت Application...")
+        app = Application.builder().token(config.BOT_TOKEN).build()
+        
+        # ثبت handlers
+        logger.info("📝 ثبت handlers...")
+        
+        # Conversation handler برای /start
+        start_handler = get_start_conversation_handler()
+        app.add_handler(start_handler)
+        
+        # دستورات ساده
+        app.add_handler(CommandHandler('menu', menu_command))
+        app.add_handler(CommandHandler('help', help_command))
+        app.add_handler(CommandHandler('status', status_command))
+        
+        # Settings handlers
+        for handler in get_settings_handlers():
+            app.add_handler(handler)
+        
+        # Error handler
+        app.add_error_handler(error_handler)
+        
+        # راه‌اندازی Scheduler با JobQueue
+        logger.info("⏰ راه‌اندازی Scheduler...")
+        scheduler = setup_scheduler(app.job_queue)
+        app.bot_data['scheduler'] = scheduler
+        
+        # شروع ربات
+        logger.info("✅ ربات شروع به کار کرد!")
+        logger.info("📡 در حال گوش دادن به پیام‌ها...")
+        logger.info("⏹️ برای توقف: Ctrl+C")
+        
+        # اجرای polling
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+        
+    except KeyboardInterrupt:
+        logger.info("⛔ ربات متوقف شد (KeyboardInterrupt)")
+    except Exception as e:
+        logger.error(f"❌ خطای کلی: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        logger.info("👋 خداحافظ!")
 
-    if loop and loop.is_running():
-        logger.info("Detected running event loop — scheduling bot in existing loop.")
-        asyncio.create_task(run_app())
-    else:
-        logger.info("No running event loop — starting bot with asyncio.run")
-        asyncio.run(run_app())
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

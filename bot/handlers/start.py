@@ -11,18 +11,17 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
+from telegram.error import TelegramError, BadRequest, Forbidden
 
 from core.database import get_or_create_user, SessionLocal, UserSettings
 from bot.keyboards.inline import (
     get_main_menu_keyboard,
     get_time_selection_keyboard,
-    get_destination_keyboard
+    get_destination_keyboard,
+    get_back_to_menu_button
 )
 from bot.handlers.genre import show_genre_selection, handle_genre_selection
 from bot.states import CHOOSING_GENRE, SETTING_TIME, CHOOSING_DESTINATION, SETTING_CHANNEL
-
-# اضافه برای scheduler
-from core.scheduler import schedule_user_daily_music
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,7 +52,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت انتخاب زمان از دکمه‌ها"""
+    """مدیریت انتخاب زمان"""
     query = update.callback_query
     await query.answer()
     
@@ -67,7 +66,6 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
             return SETTING_TIME
         
         send_time = data.split("_")[1]
-        
         user_id = update.effective_user.id
         
         db = SessionLocal()
@@ -77,8 +75,11 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
                 settings.send_time = send_time
                 db.commit()
                 
-                # اضافه کردن/بروزرسانی job روزانه
-                schedule_user_daily_music(user_id)
+                # تنظیم scheduler
+                scheduler = context.bot_data.get('scheduler')
+                if scheduler:
+                    from core.scheduler import schedule_user_daily_music_helper
+                    schedule_user_daily_music_helper(user_id, scheduler)
         finally:
             db.close()
         
@@ -92,6 +93,8 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """مدیریت زمان سفارشی"""
+    from utils.helpers import validate_time_format
+    
     time_str = update.message.text.strip()
     
     if not validate_time_format(time_str):
@@ -107,8 +110,11 @@ async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             settings.send_time = time_str
             db.commit()
             
-            # اضافه کردن/بروزرسانی job روزانه
-            schedule_user_daily_music(user_id)
+            # تنظیم scheduler
+            scheduler = context.bot_data.get('scheduler')
+            if scheduler:
+                from core.scheduler import schedule_user_daily_music_helper
+                schedule_user_daily_music_helper(user_id, scheduler)
     finally:
         db.close()
     
@@ -133,34 +139,44 @@ async def destination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not settings:
             await query.edit_message_text("❌ تنظیمات پیدا نشد!")
-            return
+            return ConversationHandler.END
         
         if data == "dest_private":
             settings.send_to = "private"
             settings.channel_id = None
             db.commit()
             
-            # اضافه کردن/بروزرسانی job روزانه
-            schedule_user_daily_music(user_id)
+            # تنظیم scheduler
+            scheduler = context.bot_data.get('scheduler')
+            if scheduler:
+                from core.scheduler import schedule_user_daily_music_helper
+                schedule_user_daily_music_helper(user_id, scheduler)
             
             await query.edit_message_text(
-                text="✅ مقصد به پیوی (خصوصی) تنظیم شد!\n\n"
-                     "تنظیمات کامل شد. /menu برای منو.",
+                text="✅ تنظیمات با موفقیت ذخیره شد!\n\n"
+                     "🎵 هر روز یه آهنگ جدید میگیری!\n\n"
+                     "از /menu می‌تونی تنظیمات رو تغییر بدی 👇",
                 reply_markup=get_main_menu_keyboard()
             )
             return ConversationHandler.END
         
         elif data == "dest_channel":
-            await choose_channel_destination(update, context)
+            await query.edit_message_text(
+                text="📢 خوبه! حالا آیدی کانال رو برام بفرست:\n\n"
+                     "مثال:\n"
+                     "• @my_music_channel\n"
+                     "• -1001234567890\n\n"
+                     "⚠️ مهم: من باید **ادمین** کانال باشم!",
+                reply_markup=None
+            )
             return SETTING_CHANNEL
     finally:
         db.close()
 
 
 async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """handler برای دریافت آیدی کانال (از channel.py ادغام‌شده)"""
+    """دریافت آیدی کانال"""
     channel_input = update.message.text.strip()
-    
     user_id = update.effective_user.id
     
     try:
@@ -176,7 +192,8 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if not bot_is_admin:
             await update.message.reply_text(
-                "⚠️ من ادمین کانال نیستم! اول منو ادمین کن بعد دوباره امتحان کن.",
+                "⚠️ من ادمین کانال نیستم!\n\n"
+                "لطفاً من رو ادمین کن و دوباره امتحان کن.",
                 reply_markup=get_back_to_menu_button()
             )
             return SETTING_CHANNEL
@@ -184,33 +201,34 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         display_id = f"@{chat.username}" if chat.username else str(chat_id)
 
         db = SessionLocal()
-        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if settings:
-            settings.send_to = "channel"
-            settings.channel_id = str(chat_id)
-            db.commit()
-            
-            # اضافه کردن/بروزرسانی job روزانه
-            schedule_user_daily_music(user_id)
-        db.close()
+        try:
+            settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            if settings:
+                settings.send_to = "channel"
+                settings.channel_id = str(chat_id)
+                db.commit()
+                
+                # تنظیم scheduler
+                scheduler = context.bot_data.get('scheduler')
+                if scheduler:
+                    from core.scheduler import schedule_user_daily_music_helper
+                    schedule_user_daily_music_helper(user_id, scheduler)
+        finally:
+            db.close()
 
         await update.message.reply_text(
-            f"✅ عالی! کانال با موفقیت تنظیم شد:\n\n"
-            f"📢 {chat.title if hasattr(chat, 'title') else display_id}\n"
-            f"🆔 {display_id}\n\n"
+            f"✅ عالی! کانال تنظیم شد:\n\n"
+            f"📢 {chat.title if hasattr(chat, 'title') else display_id}\n\n"
             f"تنظیمات کامل شد. /menu برای منو.",
             reply_markup=get_main_menu_keyboard()
         )
 
-        if 'pending_destination' in context.user_data:
-            del context.user_data['pending_destination']
-
         return ConversationHandler.END
 
-    except (TelegramError, ValueError) as e:
+    except (BadRequest, Forbidden, ValueError, TelegramError) as e:
         await update.message.reply_text(
-            f"❌ خطا: {str(e)}\n\n"
-            "آیدی کانال رو درست وارد کن و مطمئن شو من ادمینم!",
+            f"❌ خطا: آیدی کانال رو درست وارد کن!\n\n"
+            "مطمئن شو من ادمینم.",
             reply_markup=get_back_to_menu_button()
         )
         return SETTING_CHANNEL
@@ -226,7 +244,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_start_conversation_handler():
-    """ساخت conversation handler برای /start"""
+    """ساخت conversation handler"""
     return ConversationHandler(
         entry_points=[
             CommandHandler('start', start_command)
