@@ -8,12 +8,29 @@ from telegram.ext import Application
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-TOKEN = os.getenv("BOT_TOKEN")  # <-- set this in Render env
+TOKEN = os.environ.get("BOT_TOKEN")  # set this in Render env vars
 
 async def _async_start(app: Application):
-    # register handlers here BEFORE starting
+    # REGISTER HANDLERS HERE (قبل از start)
     # from bot.handlers import register_handlers
     # register_handlers(app)
+
+    # temporary debug: detect ellipsis placeholders early
+    for groups in app.handlers.values():
+        for g in groups:
+            if isinstance(g, (list, tuple)):
+                for h in g:
+                    if h is ...:
+                        raise RuntimeError("Found ellipsis (...) in handler registration — remove it")
+            else:
+                if g is ...:
+                    raise RuntimeError("Found ellipsis (...) in handler registration — remove it")
+
+    # remove webhook (safe) before polling
+    try:
+        await app.bot.delete_webhook()
+    except Exception:
+        pass
 
     await app.initialize()
     await app.start()
@@ -47,7 +64,7 @@ async def run_app():
         logger.error("BOT_TOKEN not set in environment")
         return
     app = Application.builder().token(TOKEN).build()
-    # register handlers
+    # register handlers here
     # from bot.handlers import register_handlers
     # register_handlers(app)
     await _async_start(app)
