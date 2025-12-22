@@ -36,95 +36,37 @@ class SpotifyService:
         """بررسی در دسترس بودن سرویس"""
         return self.sp is not None
     
-    # ==================== جستجوی آهنگ ====================
-    
     def search_tracks_by_genre(
         self, 
         genre: str, 
         limit: int = 50,
         market: str = 'US'
     ) -> List[Dict[str, Any]]:
-        """
-        جستجوی آهنگ بر اساس ژانر
-        
-        Args:
-            genre: نام ژانر (مثل pop, rock, jazz)
-            limit: تعداد نتایج (حداکثر 50)
-            market: بازار (US, GB, IR, ...)
-        
-        Returns:
-            لیست آهنگ‌ها
-        """
+        """جستجوی آهنگ بر اساس ژانر"""
         if not self.is_available():
             logger.error("❌ Spotify Service در دسترس نیست")
             return []
         
         try:
-            # جستجو با query ژانر
             results = self.sp.search(
                 q=f'genre:{genre}',
                 type='track',
                 limit=limit,
                 market=market
             )
-            
             tracks = results['tracks']['items']
             logger.info(f"✅ {len(tracks)} آهنگ از ژانر {genre} پیدا شد")
-            return tracks
-            
-        except Exception as e:
-            logger.error(f"❌ خطا در جستجوی آهنگ: {e}")
-            return []
-    
-    def search_tracks_by_keyword(
-        self,
-        keyword: str,
-        limit: int = 50,
-        market: str = 'US'
-    ) -> List[Dict[str, Any]]:
-        """
-        جستجوی آهنگ بر اساس کلمه کلیدی
-        
-        Args:
-            keyword: کلمه کلیدی جستجو
-            limit: تعداد نتایج
-            market: بازار
-        
-        Returns:
-            لیست آهنگ‌ها
-        """
-        if not self.is_available():
-            return []
-        
-        try:
-            results = self.sp.search(
-                q=keyword,
-                type='track',
-                limit=limit,
-                market=market
-            )
-            tracks = results['tracks']['items']
-            logger.info(f"✅ {len(tracks)} آهنگ برای '{keyword}' پیدا شد")
             return tracks
         except Exception as e:
             logger.error(f"❌ خطا در جستجو: {e}")
             return []
-
+    
     def get_random_track(
         self,
         genre: str,
         exclude_ids: List[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        دریافت یک آهنگ تصادفی از ژانر
-        
-        Args:
-            genre: ژانر
-            exclude_ids: لیست IDهایی که تکراری نباشن
-        
-        Returns:
-            اطلاعات آهنگ یا None
-        """
+        """دریافت یک آهنگ تصادفی از ژانر"""
         tracks = self.search_tracks_by_genre(genre)
         if not tracks:
             return None
@@ -137,15 +79,7 @@ class SpotifyService:
         return None
 
     def format_track_info(self, track: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        فرمت کردن اطلاعات آهنگ برای نمایش
-        
-        Args:
-            track: اطلاعات خام از Spotify
-        
-        Returns:
-            دیکشنری فرمت شده
-        """
+        """فرمت کردن اطلاعات آهنگ برای نمایش"""
         artists = [a['name'] for a in track['artists']]
         artist_str = ', '.join(artists)
         
@@ -161,40 +95,48 @@ class SpotifyService:
             }
         }
 
-    def get_recommendations(
-        self,
-        seed_tracks: List[str] = None,
-        seed_artists: List[str] = None,
-        seed_genres: List[str] = None,
-        limit: int = 20
-    ) -> List[Dict[str, Any]]:
-        """
-        دریافت recommendations از Spotify
+
+# ==================== Singleton Instance ====================
+
+spotify_service = SpotifyService()  # این خط خیلی مهمه! بدون این، ایمپورت شکست می‌خوره
+
+
+# ==================== Helper Functions ====================
+
+def get_random_track_for_user(user_id: int, genre: str) -> Optional[Dict[str, Any]]:
+    """
+    دریافت یک آهنگ تصادفی برای کاربر (با چک کردن تاریخچه تکراری)
+    """
+    from core.database import SessionLocal, SentTrack
+    
+    db = SessionLocal()
+    try:
+        sent_tracks = db.query(SentTrack).filter(
+            SentTrack.user_id == user_id
+        ).order_by(SentTrack.sent_at.desc()).limit(50).all()
         
-        Args:
-            seed_tracks: لیست ID آهنگ‌ها
-            seed_artists: لیست ID هنرمندان
-            seed_genres: لیست ژانرها
-            limit: تعداد
-        
-        Returns:
-            لیست آهنگ‌های پیشنهادی
-        """
-        if not self.is_available():
-            return []
-        
-        try:
-            recommendations = self.sp.recommendations(
-                seed_tracks=seed_tracks,
-                seed_artists=seed_artists,
-                seed_genres=seed_genres,
-                limit=limit
-            )
-            
-            tracks = recommendations['tracks']
-            logger.info(f"✅ {len(tracks)} آهنگ پیشنهاد داده شد")
-            return tracks
-            
-        except Exception as e:
-            logger.error(f"❌ خطا در دریافت recommendations: {e}")
-            return
+        exclude_ids = [t.track_id for t in sent_tracks]
+    finally:
+        db.close()
+    
+    track = spotify_service.get_random_track(genre, exclude_ids=exclude_ids)
+    
+    if not track:
+        return None
+    
+    return spotify_service.format_track_info(track)
+
+
+if __name__ == "__main__":
+    print("🧪 در حال تست Spotify Service...")
+    
+    if spotify_service.is_available():
+        print("✅ Spotify در دسترس است")
+        track = spotify_service.get_random_track('pop')
+        if track:
+            formatted = spotify_service.format_track_info(track)
+            print(f"نام: {formatted['name']}")
+            print(f"هنرمند: {formatted['artist_str']}")
+            print(f"لینک: {formatted['links']['spotify']}")
+    else:
+        print("❌ Spotify در دسترس نیست - credentials را چک کنید")
