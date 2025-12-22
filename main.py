@@ -11,11 +11,21 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ.get("BOT_TOKEN")  # set this in Render env vars
 
 async def _async_start(app: Application):
-    # REGISTER HANDLERS HERE (قبل از start)
-    # from bot.handlers import register_handlers
-    # register_handlers(app)
+    # Register handlers here (if you have a central register function, it should import and run it)
+    try:
+        from bot.handlers import register_handlers
+    except Exception:
+        register_handlers = None
 
-    # temporary debug: detect ellipsis placeholders early
+    if register_handlers:
+        try:
+            register_handlers(app)
+            logger.info("Handlers registered via bot.handlers.register_handlers")
+        except Exception as exc:
+            logger.exception("Failed to register handlers: %s", exc)
+            raise
+
+    # Temporary debug: detect ellipsis placeholders early
     for groups in app.handlers.values():
         for g in groups:
             if isinstance(g, (list, tuple)):
@@ -26,11 +36,11 @@ async def _async_start(app: Application):
                 if g is ...:
                     raise RuntimeError("Found ellipsis (...) in handler registration — remove it")
 
-    # remove webhook (safe) before polling
+    # Ensure webhook removed before polling (safe; harmless if no webhook)
     try:
         await app.bot.delete_webhook()
     except Exception:
-        pass
+        logger.debug("delete_webhook failed or was unnecessary")
 
     await app.initialize()
     await app.start()
@@ -44,8 +54,10 @@ async def _async_start(app: Application):
             try:
                 loop.add_signal_handler(sig, stop_event.set)
             except NotImplementedError:
+                # Not available on some platforms
                 pass
     except RuntimeError:
+        # no running loop
         pass
 
     try:
@@ -54,9 +66,15 @@ async def _async_start(app: Application):
         pass
     finally:
         logger.info("Shutting down bot...")
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
+        try:
+            await app.updater.stop()
+        except Exception:
+            logger.debug("updater.stop() failed or unnecessary")
+        try:
+            await app.stop()
+            await app.shutdown()
+        except Exception:
+            logger.exception("Error during shutdown")
         logger.info("Bot shutdown complete")
 
 async def run_app():
@@ -64,9 +82,6 @@ async def run_app():
         logger.error("BOT_TOKEN not set in environment")
         return
     app = Application.builder().token(TOKEN).build()
-    # register handlers here
-    # from bot.handlers import register_handlers
-    # register_handlers(app)
     await _async_start(app)
 
 def main():
