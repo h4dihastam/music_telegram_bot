@@ -76,23 +76,18 @@ class SentTrack(Base):
     user = relationship("User", back_populates="sent_tracks")
 
 
-class TrackCache(Base):
-    """کش اطلاعات آهنگ‌ها (برای lyrics و...)"""
-    __tablename__ = 'track_cache'
+class LyricsCache(Base):
+    __tablename__ = 'lyrics_cache'
     
-    track_id = Column(String(100), primary_key=True)  # Spotify ID
-    track_data = Column(Text, nullable=True)  # JSON اطلاعات آهنگ
-    lyrics = Column(Text, nullable=True)  # متن آهنگ
+    spotify_id = Column(String(100), primary_key=True)
+    lyrics = Column(Text, nullable=False)
     cached_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-
-# ==================== Functions ====================
 
 def init_db():
     """ساخت تمام جداول"""
-    Base.metadata.create_all(bind=engine)
-    print("✅ دیتابیس با موفقیت ساخته شد")
+    Base.metadata.create_all(engine)
+    print("✅ دیتابیس راه‌اندازی شد")
 
 
 def get_or_create_user(

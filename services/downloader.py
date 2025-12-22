@@ -82,250 +82,54 @@ class MusicDownloader:
         except Exception as e:
             logger.error(f"❌ خطا در جستجوی YouTube: {e}")
             return None
-    
-    # ==================== دانلود از YouTube ====================
-    
-    def download_from_youtube(
+
+    def download_track(
         self,
-        video_id: str = None,
-        url: str = None,
-        track_name: str = None,
-        artist_name: str = None
+        track_name: str,
+        artist_name: str
     ) -> Optional[str]:
         """
-        دانلود موزیک از YouTube
+        دانلود آهنگ از YouTube
         
         Args:
-            video_id: شناسه ویدیو YouTube
-            url: لینک مستقیم YouTube
-            track_name: نام آهنگ (برای جستجو)
-            artist_name: نام هنرمند (برای جستجو)
+            track_name: نام آهنگ
+            artist_name: نام هنرمند
         
         Returns:
             مسیر فایل دانلود شده یا None
         """
+        video_info = self.search_youtube(track_name, artist_name)
+        if not video_info:
+            return None
+        
+        ydl_opts = self.ydl_opts.copy()
+        ydl_opts['outtmpl'] = str(self.download_dir / f"{video_info['id']}.%(ext)s")
+        
         try:
-            # اگه video_id یا url نداشتیم، جستجو کن
-            if not video_id and not url:
-                if not track_name:
-                    logger.error("❌ نیاز به video_id، url، یا track_name")
-                    return None
-                
-                video = self.search_youtube(track_name, artist_name or "")
-                if not video:
-                    return None
-                
-                video_id = video.get('id')
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_info['url']])
             
-            # ساخت URL
-            if not url:
-                url = f"https://www.youtube.com/watch?v={video_id}"
-            
-            logger.info(f"📥 در حال دانلود از: {url}")
-            
-            # دانلود
-            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                
-                # پیدا کردن فایل دانلود شده
-                video_id = info.get('id', 'unknown')
-                downloaded_file = self.download_dir / f"{video_id}.mp3"
-                
-                if downloaded_file.exists():
-                    file_size_mb = downloaded_file.stat().st_size / (1024 * 1024)
-                    logger.info(f"✅ دانلود موفق: {downloaded_file.name} ({file_size_mb:.2f} MB)")
-                    return str(downloaded_file)
-                else:
-                    logger.error("❌ فایل دانلود شده پیدا نشد")
-                    return None
+            file_path = self.download_dir / f"{video_info['id']}.mp3"
+            if file_path.exists():
+                logger.info(f"✅ دانلود موفق: {file_path}")
+                return str(file_path)
+            else:
+                logger.warning("⚠️ فایل دانلود شده پیدا نشد")
+                return None
                 
         except Exception as e:
             logger.error(f"❌ خطا در دانلود: {e}")
             return None
-    
-    # ==================== دانلود با جستجوی خودکار ====================
-    
-    def download_track(
+
+    def download_preview_from_spotify(
         self,
-        track_name: str,
-        artist_name: str,
-        max_size_mb: int = None
-    ) -> Optional[str]:
-        """
-        دانلود آهنگ با جستجوی خودکار در YouTube
-        
-        Args:
-            track_name: نام آهنگ
-            artist_name: نام هنرمند
-            max_size_mb: حداکثر حجم مجاز (مگابایت)
-        
-        Returns:
-            مسیر فایل یا None
-        """
-        if max_size_mb is None:
-            max_size_mb = config.MAX_DOWNLOAD_SIZE_MB
-        
-        logger.info(f"🎵 در حال دانلود: {track_name} - {artist_name}")
-        
-        # جستجو در YouTube
-        video = self.search_youtube(track_name, artist_name)
-        if not video:
-            logger.warning("⚠️ ویدیو پیدا نشد")
-            return None
-        
-        # بررسی مدت زمان (برای جلوگیری از دانلود چیزهای طولانی)
-        duration = video.get('duration', 0)
-        if duration > 600:  # بیشتر از 10 دقیقه
-            logger.warning(f"⚠️ ویدیو خیلی طولانیه: {duration}s")
-            return None
-        
-        # دانلود
-        video_id = video.get('id')
-        file_path = self.download_from_youtube(video_id=video_id)
-        
-        if not file_path:
-            return None
-        
-        # بررسی حجم فایل
-        file_size_mb = Path(file_path).stat().st_size / (1024 * 1024)
-        if file_size_mb > max_size_mb:
-            logger.warning(f"⚠️ فایل خیلی بزرگه: {file_size_mb:.2f} MB")
-            # حذف فایل
-            Path(file_path).unlink()
-            return None
-        
-        return file_path
-    
-    # ==================== دانلود با لینک Spotify ====================
-    
-    def download_from_spotify_info(
-        self,
-        track_info: Dict[str, Any]
-    ) -> Optional[str]:
-        """
-        دانلود آهنگ با استفاده از اطلاعات Spotify
-        
-        Args:
-            track_info: دیکشنری فرمت شده از spotify service
-        
-        Returns:
-            مسیر فایل یا None
-        """
-        track_name = track_info.get('name')
-        artist_str = track_info.get('artist_str')
-        
-        if not track_name:
-            logger.error("❌ نام آهنگ موجود نیست")
-            return None
-        
-        return self.download_track(track_name, artist_str or "")
-    
-    # ==================== مدیریت فایل‌ها ====================
-    
-    def cleanup_old_files(self, max_age_hours: int = 24):
-        """
-        پاک کردن فایل‌های قدیمی
-        
-        Args:
-            max_age_hours: حداکثر سن فایل به ساعت
-        """
-        import time
-        
-        now = time.time()
-        max_age_seconds = max_age_hours * 3600
-        deleted_count = 0
-        
-        try:
-            for file in self.download_dir.glob('*'):
-                if file.is_file():
-                    file_age = now - file.stat().st_mtime
-                    if file_age > max_age_seconds:
-                        file.unlink()
-                        deleted_count += 1
-            
-            if deleted_count > 0:
-                logger.info(f"🗑️ {deleted_count} فایل قدیمی حذف شد")
-                
-        except Exception as e:
-            logger.error(f"❌ خطا در cleanup: {e}")
-    
-    def get_file_size(self, file_path: str) -> float:
-        """
-        دریافت حجم فایل به مگابایت
-        
-        Args:
-            file_path: مسیر فایل
-        
-        Returns:
-            حجم به MB
-        """
-        try:
-            size_bytes = Path(file_path).stat().st_size
-            return size_bytes / (1024 * 1024)
-        except Exception as e:
-            logger.error(f"❌ خطا در دریافت حجم فایل: {e}")
-            return 0
-    
-    def delete_file(self, file_path: str):
-        """
-        حذف یک فایل
-        
-        Args:
-            file_path: مسیر فایل
-        """
-        try:
-            Path(file_path).unlink()
-            logger.info(f"🗑️ فایل حذف شد: {file_path}")
-        except Exception as e:
-            logger.error(f"❌ خطا در حذف فایل: {e}")
-    
-    # ==================== Download with Fallback ====================
-    
-    def download_with_fallback(
-        self,
-        track_name: str,
-        artist_name: str,
-        spotify_preview_url: str = None
-    ) -> Optional[str]:
-        """
-        دانلود با روش‌های جایگزین
-        
-        اول YouTube رو امتحان می‌کنه
-        اگه نشد و preview URL داره، اون رو دانلود می‌کنه
-        
-        Args:
-            track_name: نام آهنگ
-            artist_name: نام هنرمند
-            spotify_preview_url: لینک preview 30 ثانیه‌ای Spotify
-        
-        Returns:
-            مسیر فایل یا None
-        """
-        # روش 1: YouTube
-        file_path = self.download_track(track_name, artist_name)
-        
-        if file_path:
-            return file_path
-        
-        # روش 2: Spotify Preview (اگه موجود باشه)
-        if spotify_preview_url:
-            logger.info("⚠️ دانلود از YouTube ناموفق - استفاده از Spotify preview")
-            return self._download_spotify_preview(spotify_preview_url, track_name)
-        
-        logger.error("❌ تمام روش‌های دانلود ناموفق بود")
-        return None
-    
-    def _download_spotify_preview(
-        self,
-        preview_url: str,
-        track_name: str
+        preview_url: str
     ) -> Optional[str]:
         """
         دانلود preview 30 ثانیه‌ای از Spotify
         
         Args:
             preview_url: لینک preview
-            track_name: نام آهنگ
         
         Returns:
             مسیر فایل یا None
@@ -355,6 +159,36 @@ class MusicDownloader:
             logger.error(f"❌ خطا در دانلود preview: {e}")
             return None
 
+    def cleanup_old_files(self, max_age_hours: int = 6):
+        """
+        پاک کردن فایل‌های قدیمی برای مدیریت فضا
+        """
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        for file in self.download_dir.iterdir():
+            if file.is_file():
+                age = now - datetime.fromtimestamp(file.stat().st_mtime)
+                if age > timedelta(hours=max_age_hours):
+                    file.unlink()
+                    logger.info(f"🗑️ فایل قدیمی حذف شد: {file}")
+
+    def download_with_fallback(
+        self,
+        track_name: str,
+        artist_name: str,
+        spotify_preview_url: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        دانلود با fallback: اول YouTube، اگر نشد preview Spotify
+        """
+        file_path = self.download_track(track_name, artist_name)
+        if file_path:
+            return file_path
+        
+        if spotify_preview_url:
+            return self.download_preview_from_spotify(spotify_preview_url)
+        
+        return None
 
 # ==================== Singleton Instance ====================
 
@@ -409,7 +243,7 @@ if __name__ == "__main__":
     file_path = downloader.download_track(test_track, test_artist)
     
     if file_path:
-        size = downloader.get_file_size(file_path)
+        size = os.path.getsize(file_path) / (1024 * 1024)
         print(f"✅ دانلود موفق!")
         print(f"   مسیر: {file_path}")
         print(f"   حجم: {size:.2f} MB")

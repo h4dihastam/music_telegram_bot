@@ -5,6 +5,7 @@ import logging
 import requests
 from typing import Optional, Dict, Any
 from core.config import config
+from core.database import SessionLocal, LyricsCache
 
 logger = logging.getLogger(__name__)
 
@@ -83,22 +84,19 @@ class MusixmatchService:
             logger.info(f"✅ آهنگ پیدا شد: {track['track_name']} - {track['artist_name']}")
             
             return track
-            
         except Exception as e:
-            logger.error(f"❌ خطا در جستجوی آهنگ: {e}")
+            logger.error(f"❌ خطا در جستجوی Musixmatch: {e}")
             return None
-    
-    # ==================== دریافت Lyrics ====================
-    
-    def get_lyrics(
-        self, 
+
+    def get_lyrics_by_id(
+        self,
         track_id: int
     ) -> Optional[str]:
         """
-        دریافت متن کامل آهنگ
+        دریافت lyrics با ID آهنگ
         
         Args:
-            track_id: شناسه آهنگ در Musixmatch
+            track_id: ID آهنگ در Musixmatch
         
         Returns:
             متن آهنگ یا None
@@ -120,38 +118,30 @@ class MusixmatchService:
             
             data = response.json()
             
-            # چک کردن status
             if data['message']['header']['status_code'] != 200:
-                logger.warning(f"⚠️ Lyrics پیدا نشد برای track_id: {track_id}")
+                logger.warning(f"⚠️ Musixmatch lyrics error: {data['message']['header']['status_code']}")
                 return None
             
-            lyrics_body = data['message']['body'].get('lyrics', {})
-            lyrics_text = lyrics_body.get('lyrics_body', '')
+            lyrics_body = data['message']['body'].get('lyrics', {}).get('lyrics_body')
+            if lyrics_body:
+                # پاک کردن فوتر Musixmatch
+                lyrics = lyrics_body.split('*******')[0].strip()
+                logger.info(f"✅ Lyrics دریافت شد برای ID {track_id}")
+                return lyrics
             
-            if not lyrics_text:
-                return None
-            
-            # پاک کردن متن اضافه در آخر
-            # Musixmatch متن اضافه می‌ذاره در آخر
-            if "******* This Lyrics is NOT for Commercial use *******" in lyrics_text:
-                lyrics_text = lyrics_text.split("******* This Lyrics is NOT for Commercial use *******")[0]
-            
-            lyrics_text = lyrics_text.strip()
-            
-            logger.info(f"✅ Lyrics دریافت شد ({len(lyrics_text)} کاراکتر)")
-            return lyrics_text
+            return None
             
         except Exception as e:
             logger.error(f"❌ خطا در دریافت lyrics: {e}")
             return None
-    
+
     def get_lyrics_by_name(
-        self, 
-        track_name: str, 
-        artist_name: str = None
+        self,
+        track_name: str,
+        artist_name: str
     ) -> Optional[str]:
         """
-        دریافت متن آهنگ با نام آهنگ و هنرمند
+        دریافت lyrics با نام آهنگ و هنرمند
         
         Args:
             track_name: نام آهنگ
@@ -160,107 +150,50 @@ class MusixmatchService:
         Returns:
             متن آهنگ یا None
         """
-        # اول آهنگ رو پیدا کن
         track = self.search_track(track_name, artist_name)
-        
         if not track:
             return None
         
-        # حالا lyrics رو بگیر
-        track_id = track['track_id']
-        return self.get_lyrics(track_id)
-    
-    # ==================== دریافت Snippet ====================
-    
-    def get_lyrics_snippet(
-        self,
-        track_name: str,
-        artist_name: str = None,
-        max_lines: int = 4
-    ) -> Optional[str]:
-        """
-        دریافت snippet (قسمت کوچکی) از lyrics
-        برای نمایش در پیام
-        
-        Args:
-            track_name: نام آهنگ
-            artist_name: نام هنرمند
-            max_lines: حداکثر تعداد خطوط
-        
-        Returns:
-            snippet متن یا None
-        """
-        lyrics = self.get_lyrics_by_name(track_name, artist_name)
-        
-        if not lyrics:
-            return None
-        
-        # گرفتن چند خط اول
-        lines = lyrics.split('\n')
-        snippet_lines = lines[:max_lines]
-        snippet = '\n'.join(snippet_lines)
-        
-        # اگه lyrics بیشتر از snippet بود، ... اضافه کن
-        if len(lines) > max_lines:
-            snippet += "\n..."
-        
-        return snippet
-    
-    # ==================== Cache Management ====================
-    
+        return self.get_lyrics_by_id(track['track_id'])
+
     def get_cached_lyrics(
         self,
-        track_id_spotify: str,
+        spotify_id: str,
         track_name: str,
         artist_name: str
     ) -> Optional[str]:
         """
-        دریافت lyrics با استفاده از cache
+        دریافت lyrics از cache یا API
         
         Args:
-            track_id_spotify: Spotify ID
+            spotify_id: ID اسپاتیفای برای cache
             track_name: نام آهنگ
             artist_name: نام هنرمند
         
         Returns:
-            متن آهنگ
+            متن آهنگ یا None
         """
-        from core.database import SessionLocal, TrackCache
-        import json
-        from datetime import datetime, timedelta
-        
         db = SessionLocal()
         try:
-            # چک کردن cache
-            cached = db.query(TrackCache).filter(
-                TrackCache.track_id == track_id_spotify
-            ).first()
+            cached = db.query(LyricsCache).filter(LyricsCache.spotify_id == spotify_id).first()
             
-            # اگه cache موجود بود و تازه بود (کمتر از 30 روز)
-            if cached and cached.lyrics:
-                cache_age = datetime.utcnow() - cached.cached_at
-                if cache_age < timedelta(days=30):
-                    logger.info(f"✅ Lyrics از cache بارگذاری شد")
-                    return cached.lyrics
+            if cached:
+                logger.info(f"✅ Lyrics از cache دریافت شد: {spotify_id}")
+                return cached.lyrics
             
-            # اگه cache نبود یا قدیمی بود، از API بگیر
+            # اگر نبود، از API بگیر
             lyrics = self.get_lyrics_by_name(track_name, artist_name)
+            if not lyrics:
+                return None
             
-            if lyrics:
-                # ذخیره در cache
-                if cached:
-                    cached.lyrics = lyrics
-                    cached.cached_at = datetime.utcnow()
-                else:
-                    new_cache = TrackCache(
-                        track_id=track_id_spotify,
-                        track_data=json.dumps({'name': track_name, 'artist': artist_name}),
-                        lyrics=lyrics
-                    )
-                    db.add(new_cache)
-                
-                db.commit()
-                logger.info(f"✅ Lyrics در cache ذخیره شد")
+            # ذخیره در cache
+            cache_entry = LyricsCache(
+                spotify_id=spotify_id,
+                lyrics=lyrics
+            )
+            db.add(cache_entry)
+            db.commit()
+            logger.info(f"✅ Lyrics در cache ذخیره شد")
             
             return lyrics
             
