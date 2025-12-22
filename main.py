@@ -1,5 +1,5 @@
 """
-ربات موزیک تلگرام - نقطه ورود اصلی (اصلاح نهایی برای Render.com)
+ربات موزیک تلگرام - نقطه ورود اصلی (نسخه نهایی پایدار برای Render.com)
 """
 import logging
 import traceback
@@ -10,6 +10,7 @@ from telegram.ext import (
     Defaults
 )
 import pytz
+import asyncio
 
 from core.config import Config
 from core.database import init_db
@@ -57,31 +58,27 @@ async def main():
 
         logger.info("✅ ربات آنلاین شد!")
 
-        # ۵. شروع دستی اپلیکیشن (initialize + start)
+        # ۵. شروع دستی اپلیکیشن
         await app.initialize()
         await app.start()
 
-        # ۶. حالا که JobQueue فعال شده، scheduler رو راه‌اندازی کن
+        # ۶. راه‌اندازی scheduler بعد از شروع app (JobQueue حالا فعاله)
         scheduler = setup_scheduler(app.job_queue)
         app.bot_data['scheduler'] = scheduler
 
-        # ۷. شروع polling (این خط بلوکه می‌کنه تا ربات خاموش بشه)
-        await app.updater.start_polling(
+        # ۷. شروع polling - این خط بلوکه می‌کنه و ربات رو زنده نگه می‌داره
+        await app.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
         )
-
-        # ۸. نگه داشتن ربات در حال اجرا (idle)
-        await app.updater.idle()
 
     except Exception as e:
         logger.error(f"❌ خطای بحرانی در متد اصلی: {e}")
         logger.error(traceback.format_exc())
     finally:
-        # تضمین shutdown تمیز
+        # shutdown تمیز در صورت نیاز
         if 'app' in locals():
             try:
-                await app.updater.stop()
                 await app.stop()
                 await app.shutdown()
             except Exception as shutdown_error:
@@ -89,7 +86,6 @@ async def main():
 
 
 if __name__ == '__main__':
-    import asyncio
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):

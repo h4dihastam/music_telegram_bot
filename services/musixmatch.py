@@ -1,238 +1,91 @@
 """
-Musixmatch Service - دریافت متن (lyrics) آهنگ‌ها
+Musixmatch Service - دریافت متن (lyrics) آهنگ با استفاده از API غیررسمی رایگان
+منبع: https://github.com/Strvm/musicxmatch-api
 """
 import logging
 import requests
-from typing import Optional, Dict, Any
-from core.config import config
-from core.database import SessionLocal, LyricsCache
+from typing import Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+# آدرس API غیررسمی رایگان (بدون نیاز به کلید)
+BASE_URL = "https://api.music.xiaomiir.com/api/v2/music/lyrics"
 
 class MusixmatchService:
-    """کلاس برای کار با Musixmatch API"""
-    
-    BASE_URL = "https://api.musixmatch.com/ws/1.1"
-    
+    """کلاس برای دریافت lyrics از سرویس رایگان"""
+
     def __init__(self):
-        """راه‌اندازی Musixmatch service"""
-        self.api_key = config.MUSIXMATCH_API_KEY
-        
-        if not self.api_key:
-            logger.warning("⚠️ Musixmatch API Key موجود نیست!")
-        else:
-            logger.info("✅ Musixmatch Service راه‌اندازی شد")
-    
-    def is_available(self) -> bool:
-        """بررسی در دسترس بودن سرویس"""
-        return self.api_key is not None and self.api_key != ""
-    
-    # ==================== جستجوی آهنگ ====================
-    
-    def search_track(
-        self, 
-        track_name: str, 
-        artist_name: str = None
-    ) -> Optional[Dict[str, Any]]:
+        logger.info("✅ Musixmatch Service (غیررسمی رایگان) راه‌اندازی شد")
+
+    def search_lyrics(self, track_name: str, artist_name: str) -> Optional[str]:
         """
-        جستجوی آهنگ در Musixmatch
-        
+        جستجو و دریافت lyrics با نام آهنگ و هنرمند
+
         Args:
             track_name: نام آهنگ
-            artist_name: نام هنرمند (اختیاری)
-        
+            artist_name: نام هنرمند
+
         Returns:
-            اطلاعات آهنگ یا None
+            متن کامل آهنگ یا None
         """
-        if not self.is_available():
-            logger.warning("⚠️ Musixmatch در دسترس نیست")
-            return None
-        
         try:
-            params = {
-                'apikey': self.api_key,
-                'q_track': track_name,
-                'page_size': 1,
-                'page': 1,
-                's_track_rating': 'desc'  # بهترین match
+            # ساخت query
+            query = f"{track_name} {artist_name}"
+            encoded_query = quote(query)
+
+            url = f"{BASE_URL}?query={encoded_query}"
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
+
+            response = requests.get(url, headers=headers, timeout=15)
             
-            if artist_name:
-                params['q_artist'] = artist_name
-            
-            response = requests.get(
-                f"{self.BASE_URL}/track.search",
-                params=params,
-                timeout=10
-            )
-            
-            data = response.json()
-            
-            # چک کردن status code
-            if data['message']['header']['status_code'] != 200:
-                logger.warning(f"⚠️ Musixmatch error: {data['message']['header']['status_code']}")
+            if response.status_code != 200:
+                logger.warning(f"⚠️ پاسخ ناموفق از API: {response.status_code}")
                 return None
-            
+
+            data = response.json()
+
             # چک کردن وجود نتیجه
-            track_list = data['message']['body'].get('track_list', [])
-            if not track_list:
-                logger.warning(f"⚠️ آهنگ پیدا نشد: {track_name}")
+            if not data or 'lyrics' not in data:
+                logger.info(f"ℹ️ lyrics پیدا نشد برای: {track_name} - {artist_name}")
                 return None
-            
-            track = track_list[0]['track']
-            logger.info(f"✅ آهنگ پیدا شد: {track['track_name']} - {track['artist_name']}")
-            
-            return track
-        except Exception as e:
-            logger.error(f"❌ خطا در جستجوی Musixmatch: {e}")
-            return None
 
-    def get_lyrics_by_id(
-        self,
-        track_id: int
-    ) -> Optional[str]:
-        """
-        دریافت lyrics با ID آهنگ
-        
-        Args:
-            track_id: ID آهنگ در Musixmatch
-        
-        Returns:
-            متن آهنگ یا None
-        """
-        if not self.is_available():
-            return None
-        
-        try:
-            params = {
-                'apikey': self.api_key,
-                'track_id': track_id
-            }
-            
-            response = requests.get(
-                f"{self.BASE_URL}/track.lyrics.get",
-                params=params,
-                timeout=10
-            )
-            
-            data = response.json()
-            
-            if data['message']['header']['status_code'] != 200:
-                logger.warning(f"⚠️ Musixmatch lyrics error: {data['message']['header']['status_code']}")
+            lyrics = data['lyrics'].strip()
+
+            if not lyrics or lyrics == "Not found":
                 return None
-            
-            lyrics_body = data['message']['body'].get('lyrics', {}).get('lyrics_body')
-            if lyrics_body:
-                # پاک کردن فوتر Musixmatch
-                lyrics = lyrics_body.split('*******')[0].strip()
-                logger.info(f"✅ Lyrics دریافت شد برای ID {track_id}")
-                return lyrics
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ خطا در دریافت lyrics: {e}")
-            return None
 
-    def get_lyrics_by_name(
-        self,
-        track_name: str,
-        artist_name: str
-    ) -> Optional[str]:
-        """
-        دریافت lyrics با نام آهنگ و هنرمند
-        
-        Args:
-            track_name: نام آهنگ
-            artist_name: نام هنرمند
-        
-        Returns:
-            متن آهنگ یا None
-        """
-        track = self.search_track(track_name, artist_name)
-        if not track:
-            return None
-        
-        return self.get_lyrics_by_id(track['track_id'])
-
-    def get_cached_lyrics(
-        self,
-        spotify_id: str,
-        track_name: str,
-        artist_name: str
-    ) -> Optional[str]:
-        """
-        دریافت lyrics از cache یا API
-        
-        Args:
-            spotify_id: ID اسپاتیفای برای cache
-            track_name: نام آهنگ
-            artist_name: نام هنرمند
-        
-        Returns:
-            متن آهنگ یا None
-        """
-        db = SessionLocal()
-        try:
-            cached = db.query(LyricsCache).filter(LyricsCache.spotify_id == spotify_id).first()
-            
-            if cached:
-                logger.info(f"✅ Lyrics از cache دریافت شد: {spotify_id}")
-                return cached.lyrics
-            
-            # اگر نبود، از API بگیر
-            lyrics = self.get_lyrics_by_name(track_name, artist_name)
-            if not lyrics:
-                return None
-            
-            # ذخیره در cache
-            cache_entry = LyricsCache(
-                spotify_id=spotify_id,
-                lyrics=lyrics
-            )
-            db.add(cache_entry)
-            db.commit()
-            logger.info(f"✅ Lyrics در cache ذخیره شد")
-            
+            logger.info(f"✅ lyrics دریافت شد برای: {track_name} - {artist_name}")
             return lyrics
-            
-        finally:
-            db.close()
-    
-    # ==================== Format Lyrics ====================
-    
-    def format_lyrics_for_message(
-        self,
-        lyrics: str,
-        max_length: int = 1000
-    ) -> str:
+
+        except requests.exceptions.Timeout:
+            logger.error("⏰ تایم‌اوت در دریافت lyrics")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ خطا در ارتباط با API غیررسمی: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ خطای غیرمنتظره در دریافت lyrics: {e}")
+            return None
+
+    def format_lyrics_for_message(self, lyrics: str, max_length: int = 1000) -> str:
         """
-        فرمت کردن lyrics برای نمایش در پیام تلگرام
-        
-        Args:
-            lyrics: متن کامل
-            max_length: حداکثر طول
-        
-        Returns:
-            متن فرمت شده
+        فرمت کردن lyrics برای نمایش در تلگرام
         """
         if not lyrics:
             return "❌ متن آهنگ در دسترس نیست"
-        
-        # اگه خیلی طولانی بود، کوتاه کن
+
         if len(lyrics) > max_length:
             lyrics = lyrics[:max_length]
-            # از آخرین خط کامل استفاده کن
             last_newline = lyrics.rfind('\n')
             if last_newline > 0:
                 lyrics = lyrics[:last_newline]
-            lyrics += "\n\n... (متن کامل در لینک)"
-        
-        # اضافه کردن emoji و فرمت
-        formatted = f"📝 متن آهنگ:\n\n{lyrics}"
-        
-        return formatted
+            lyrics += "\n\n... (متن کامل در دسترس نیست)"
+
+        return f"📝 متن آهنگ:\n\n{lyrics}"
 
 
 # ==================== Singleton Instance ====================
@@ -246,49 +99,19 @@ def get_track_lyrics(
     track_name: str,
     artist_name: str,
     spotify_id: str = None,
-    use_cache: bool = True
+    use_cache: bool = False  # فعلاً cache نداریم، ولی ساختار نگه داشته شد
 ) -> Optional[str]:
     """
-    Helper function برای دریافت lyrics
-    
-    Args:
-        track_name: نام آهنگ
-        artist_name: نام هنرمند
-        spotify_id: Spotify ID (برای cache)
-        use_cache: استفاده از cache
-    
-    Returns:
-        متن آهنگ
+    دریافت lyrics با نام آهنگ و هنرمند
     """
-    if use_cache and spotify_id:
-        return musixmatch_service.get_cached_lyrics(
-            spotify_id,
-            track_name,
-            artist_name
-        )
-    else:
-        return musixmatch_service.get_lyrics_by_name(
-            track_name,
-            artist_name
-        )
+    return musixmatch_service.search_lyrics(track_name, artist_name)
 
 
 if __name__ == "__main__":
-    # تست سرویس
-    print("🧪 در حال تست Musixmatch Service...")
-    
-    service = MusixmatchService()
-    
-    if service.is_available():
-        print("✅ Musixmatch در دسترس است")
-        
-        # تست جستجو
-        lyrics = service.get_lyrics_by_name("Shape of You", "Ed Sheeran")
-        
-        if lyrics:
-            print(f"\n📝 متن آهنگ:")
-            print(lyrics[:200] + "..." if len(lyrics) > 200 else lyrics)
-        else:
-            print("❌ متن پیدا نشد")
+    print("🧪 تست Musixmatch غیررسمی...")
+    lyrics = musixmatch_service.search_lyrics("Shape of You", "Ed Sheeran")
+    if lyrics:
+        print("\n📝 بخشی از متن:")
+        print(lyrics[:300] + "..." if len(lyrics) > 300 else lyrics)
     else:
-        print("❌ Musixmatch در دسترس نیست - API Key را چک کنید")
+        print("❌ متن پیدا نشد")
