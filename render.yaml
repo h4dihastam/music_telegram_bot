@@ -1,12 +1,12 @@
 services:
   - type: worker
     name: music-telegram-bot
-    env: docker
-    dockerfilePath: ./Dockerfile
+    runtime: docker
+    dockerfilePath: Dockerfile
     dockerContext: .
-    # مهم: تنظیم تعداد instance به 1
+    # بسیار مهم: برای جلوگیری از خطای Conflict حتما باید 1 باشد
     numInstances: 1
-    plan: free  # یا starter
+    plan: free
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -17,12 +17,12 @@ services:
       - key: MUSIXMATCH_API_KEY
         sync: false
       - key: DATABASE_URL
-        value: sqlite:///data/music_bot.db
+        value: sqlite:////app/data/music_bot.db
       - key: DEFAULT_TIMEZONE
         value: Asia/Tehran
       - key: PYTHONUNBUFFERED
         value: "1"
-    # Persistent disk برای دیتابیس
+    # اتصال دیسک دائمی برای دیتابیس (تا با ریستارت پاک نشود)
     disk:
       name: bot-data
       mountPath: /app/data
