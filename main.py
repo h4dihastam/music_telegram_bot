@@ -1,5 +1,5 @@
 """
-ربات موزیک تلگرام - نقطه ورود اصلی (اصلاح شده)
+ربات موزیک تلگرام - نقطه ورود اصلی (اصلاح نهایی برای Render.com)
 """
 import logging
 import traceback
@@ -7,14 +7,13 @@ import sys
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
     Defaults
 )
 import pytz
 
 from core.config import Config
 from core.database import init_db
-from core.scheduler import setup_scheduler  # حالا با JobQueue
+from core.scheduler import setup_scheduler
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
 
 # تنظیم لاگینگ
@@ -25,11 +24,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 async def error_handler(update: Update, context):
     """مدیریت خطاهای غیرمنتظره"""
     logger.error("❌ خطای داخلی ربات:", exc_info=context.error)
     if update and update.effective_message:
-        await update.effective_message.reply_text("❌ متأسفانه مشکلی در پردازش پیش آمد. لطفاً دوباره تلاش کنید.")
+        await update.effective_message.reply_text(
+            "❌ متأسفانه مشکلی در پردازش پیش آمد. لطفاً دوباره تلاش کنید."
+        )
+
 
 async def main():
     """شروع به کار ربات"""
@@ -41,7 +44,7 @@ async def main():
         # ۲. تنظیمات پیش‌فرض (منطقه زمانی)
         defaults = Defaults(tzinfo=pytz.timezone(Config.DEFAULT_TIMEZONE))
 
-        # ۳. ساخت اپلیکیشن (با job_queue فعال)
+        # ۳. ساخت اپلیکیشن
         app = ApplicationBuilder().token(Config.BOT_TOKEN).defaults(defaults).build()
 
         # ۴. اضافه کردن هندلرها
@@ -52,21 +55,38 @@ async def main():
         
         app.add_error_handler(error_handler)
 
-        # ۵. راه‌اندازی Scheduler با JobQueue
-        scheduler = setup_scheduler(app.job_queue)  # حالا job_queue داخلی
+        logger.info("✅ ربات آنلاین شد!")
+
+        # ۵. شروع دستی اپلیکیشن (initialize + start)
+        await app.initialize()
+        await app.start()
+
+        # ۶. حالا که JobQueue فعال شده، scheduler رو راه‌اندازی کن
+        scheduler = setup_scheduler(app.job_queue)
         app.bot_data['scheduler'] = scheduler
 
-        logger.info("✅ ربات آنلاین شد!")
-        
-        # ۶. اجرای ربات (Polling)
-        await app.run_polling(
-            drop_pending_updates=True, 
+        # ۷. شروع polling (این خط بلوکه می‌کنه تا ربات خاموش بشه)
+        await app.updater.start_polling(
+            drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
         )
+
+        # ۸. نگه داشتن ربات در حال اجرا (idle)
+        await app.updater.idle()
 
     except Exception as e:
         logger.error(f"❌ خطای بحرانی در متد اصلی: {e}")
         logger.error(traceback.format_exc())
+    finally:
+        # تضمین shutdown تمیز
+        if 'app' in locals():
+            try:
+                await app.updater.stop()
+                await app.stop()
+                await app.shutdown()
+            except Exception as shutdown_error:
+                logger.error(f"خطا در shutdown: {shutdown_error}")
+
 
 if __name__ == '__main__':
     import asyncio
