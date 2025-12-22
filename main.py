@@ -1,157 +1,87 @@
 """
-Main entry point - ربات موزیک تلگرام
+Music Telegram Bot - Entry Point (نسخه نهایی با همه handlerها)
 """
+import os
+import threading
 import logging
-import traceback
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters
-)
+from flask import Flask
 
-from core.config import config
-from core.database import init_db
-from core.scheduler import setup_scheduler
-from bot.handlers import get_start_conversation_handler, get_settings_handlers
-
-# تنظیم logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+flask_app = Flask(__name__)
 
-async def error_handler(update: Update, context):
-    """مدیریت خطاها"""
-    logger.exception("خطا در هندلر:")
-    tb = ""
-    try:
-        if getattr(context, "error", None):
-            tb = "".join(traceback.format_exception(None, context.error, context.error.__traceback__))
-        else:
-            tb = "No traceback available"
-    except Exception:
-        tb = "خطا هنگام گرفتن traceback"
+@flask_app.route('/')
+@flask_app.route('/health')
+def home():
+    return "🎵 Music Telegram Bot is running! 🚀", 200
 
-    logger.error("Traceback:\n%s", tb)
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"🌐 وب‌سرور Flask روی پورت {port} شروع شد")
+    flask_app.run(host="0.0.0.0", port=port, use_reloader=False)
 
-    # پیام کاربرپسند
-    try:
-        if update and getattr(update, "effective_message", None):
-            await update.effective_message.reply_text(
-                "❌ متأسفانه یه خطایی پیش اومد!\nلطفاً دوباره امتحان کن یا /start بزن."
-            )
-    except Exception:
-        logger.exception("خطا هنگام ارسال پیام خطا به کاربر")
+# ایمپورت‌های داخلی
+from core.config import config
+from core.database import init_db
+from bot.handlers import (
+    get_start_conversation_handler,
+    get_settings_handlers,
+)
+from bot.handlers.channel import get_channel_handlers
+from bot.handlers.genre import get_genre_handlers
 
+# ساخت اپ تلگرام
+from telegram.ext import Application
 
-async def menu_command(update: Update, context):
-    """دستور /menu"""
-    from bot.handlers.settings import show_menu
-    await show_menu(update, context)
+application = Application.builder().token(config.BOT_TOKEN).build()
 
-
-async def help_command(update: Update, context):
-    """دستور /help"""
-    help_text = """
-🎵 **راهنمای ربات موزیک روزانه**
-
-📋 **دستورات:**
-/start - شروع و تنظیمات اولیه
-/menu - منوی اصلی و تنظیمات
-/status - نمایش وضعیت فعلی
-/help - نمایش این راهنما
-
-🎯 **قابلیت‌ها:**
-✅ انتخاب ژانر موسیقی
-✅ ارسال خودکار روزانه
-✅ ارسال به پیوی یا کانال
-✅ دریافت متن آهنگ
-✅ دانلود فایل MP3
-
-💡 **نکات:**
-• هر روز در زمان انتخابی یک آهنگ جدید دریافت می‌کنی
-• می‌تونی چندین ژانر انتخاب کنی
-• برای ارسال به کانال، ربات باید ادمین کانال باشه
-
-❓ مشکلی داری؟ با /start دوباره تنظیم کن!
-    """
-    await update.message.reply_text(help_text)
-
-
-async def status_command(update: Update, context):
-    """دستور /status"""
-    from bot.handlers.settings import show_status
-    # ساخت یک query موقت برای استفاده از show_status
-    class FakeQuery:
-        async def answer(self): pass
-        async def edit_message_text(self, **kwargs):
-            await update.message.reply_text(**kwargs)
+# ثبت همه handlerهای اصلی
+def register_all_handlers():
+    # ConversationHandler برای /start
+    application.add_handler(get_start_conversation_handler())
     
-    update.callback_query = FakeQuery()
-    await show_status(update, context)
+    # handlerهای تنظیمات، ژانر، کانال
+    for handler in get_settings_handlers():
+        application.add_handler(handler)
+    for handler in get_channel_handlers():
+        application.add_handler(handler)
+    for handler in get_genre_handlers():
+        application.add_handler(handler)
 
+# error handler
+async def error_handler(update, context):
+    logger.error(f"خطا: {context.error}")
+    if update and update.effective_message:
+        await update.effective_message.reply_text("❌ متأسفانه یه خطایی پیش اومد!\nلطفاً دوباره امتحان کن.")
+
+application.add_error_handler(error_handler)
+
+# scheduler
+def setup_scheduler():
+    from core.scheduler import setup_scheduler
+    try:
+        scheduler = setup_scheduler(application.bot)
+        application.bot_data['scheduler'] = scheduler
+        logger.info("⏰ Scheduler راه‌اندازی شد")
+    except Exception as e:
+        logger.error(f"خطا در scheduler: {e}")
 
 def main():
-    """راه‌اندازی ربات"""
-    try:
-        # بررسی تنظیمات
-        config.validate()
-        
-        # راه‌اندازی دیتابیس
-        logger.info("🗄️ راه‌اندازی دیتابیس...")
-        init_db()
-        
-        # ساخت Application
-        logger.info("🤖 راه‌اندازی ربات...")
-        app = Application.builder().token(config.BOT_TOKEN).build()
-        
-        # ثبت handlers
-        logger.info("📝 ثبت handlers...")
-        
-        # Conversation handler برای /start
-        app.add_handler(get_start_conversation_handler())
-        
-        # دستورات ساده
-        app.add_handler(CommandHandler('menu', menu_command))
-        app.add_handler(CommandHandler('help', help_command))
-        app.add_handler(CommandHandler('status', status_command))
-        
-        # Settings handlers
-        for handler in get_settings_handlers():
-            app.add_handler(handler)
-        
-        # Error handler
-        app.add_error_handler(error_handler)
-        
-        # راه‌اندازی Scheduler
-        logger.info("⏰ راه‌اندازی Scheduler...")
-        scheduler = setup_scheduler(app.bot)
-        
-        # ذخیره scheduler در bot_data برای دسترسی بعدی
-        app.bot_data['scheduler'] = scheduler
-        
-        # شروع ربات
-        logger.info("✅ ربات شروع به کار کرد!")
-        logger.info("برای توقف: Ctrl+C")
-        
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
-        
-    except KeyboardInterrupt:
-        logger.info("⛔ ربات متوقف شد (KeyboardInterrupt)")
-    except Exception as e:
-        logger.error(f"❌ خطای کلی: {e}")
-        logger.error(traceback.format_exc())
-    finally:
-        # Cleanup
-        if 'scheduler' in locals():
-            scheduler.shutdown()
-        logger.info("👋 خداحافظ!")
+    logger.info("🚀 راه‌اندازی ربات...")
+    
+    config.validate()
+    init_db()
+    
+    register_all_handlers()
+    setup_scheduler()
+    
+    # Flask در background
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # polling در main thread
+    logger.info("🤖 شروع polling...")
+    application.run_polling(drop_pending_updates=True)
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
