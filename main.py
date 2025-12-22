@@ -14,7 +14,7 @@ import pytz
 
 from core.config import Config
 from core.database import init_db
-from core.scheduler import setup_scheduler
+from core.scheduler import setup_scheduler  # حالا با JobQueue
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
 
 # تنظیم لاگینگ
@@ -41,7 +41,7 @@ async def main():
         # ۲. تنظیمات پیش‌فرض (منطقه زمانی)
         defaults = Defaults(tzinfo=pytz.timezone(Config.DEFAULT_TIMEZONE))
 
-        # ۳. ساخت اپلیکیشن
+        # ۳. ساخت اپلیکیشن (با job_queue فعال)
         app = ApplicationBuilder().token(Config.BOT_TOKEN).defaults(defaults).build()
 
         # ۴. اضافه کردن هندلرها
@@ -52,14 +52,13 @@ async def main():
         
         app.add_error_handler(error_handler)
 
-        # ۵. راه‌اندازی Scheduler
-        scheduler = setup_scheduler(app.bot)
+        # ۵. راه‌اندازی Scheduler با JobQueue
+        scheduler = setup_scheduler(app.job_queue)  # حالا job_queue داخلی
         app.bot_data['scheduler'] = scheduler
 
         logger.info("✅ ربات آنلاین شد!")
         
         # ۶. اجرای ربات (Polling)
-        # drop_pending_updates=True باعث حل مشکل تداخل پیام‌های قدیمی می‌شود
         await app.run_polling(
             drop_pending_updates=True, 
             allowed_updates=Update.ALL_TYPES
@@ -72,7 +71,6 @@ async def main():
 if __name__ == '__main__':
     import asyncio
     try:
-        # در پایتون‌های جدید و محیط‌های سرور، استفاده از asyncio.run بهتر است
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logger.info("⛔ ربات توسط کاربر متوقف شد.")
