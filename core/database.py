@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean, 
-    DateTime, ForeignKey
+    DateTime, ForeignKey, Text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -76,9 +76,21 @@ class SentTrack(Base):
     user = relationship("User", back_populates="sent_tracks")
 
 
+class TrackCache(Base):
+    """کش اطلاعات آهنگ‌ها (برای lyrics و...)"""
+    __tablename__ = 'track_cache'
+    
+    track_id = Column(String(100), primary_key=True)  # Spotify ID
+    track_data = Column(Text, nullable=True)  # JSON اطلاعات آهنگ
+    lyrics = Column(Text, nullable=True)  # متن آهنگ
+    cached_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ==================== Functions ====================
 
 def init_db():
+    """ساخت تمام جداول"""
     Base.metadata.create_all(bind=engine)
     print("✅ دیتابیس با موفقیت ساخته شد")
 
@@ -107,9 +119,10 @@ def get_or_create_user(
             db.commit()
             print(f"✅ کاربر جدید ساخته شد: {user_id}")
         else:
-            if username:
+            # به‌روزرسانی اطلاعات
+            if username and user.username != username:
                 user.username = username
-            if first_name:
+            if first_name and user.first_name != first_name:
                 user.first_name = first_name
             db.commit()
         
@@ -119,6 +132,7 @@ def get_or_create_user(
 
 
 def get_user_genres(user_id: int) -> list:
+    """دریافت ژانرهای کاربر"""
     db = SessionLocal()
     try:
         genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
@@ -128,14 +142,34 @@ def get_user_genres(user_id: int) -> list:
 
 
 def save_user_genre(user_id: int, genre: str):
+    """ذخیره ژانر کاربر (تک‌تایی)"""
     db = SessionLocal()
     try:
+        # حذف ژانرهای قبلی
         db.query(UserGenre).filter(UserGenre.user_id == user_id).delete()
         
+        # اضافه کردن ژانر جدید
         user_genre = UserGenre(user_id=user_id, genre=genre)
         db.add(user_genre)
         db.commit()
         print(f"✅ ژانر {genre} برای کاربر {user_id} ذخیره شد")
+    finally:
+        db.close()
+
+
+def save_user_genres(user_id: int, genres: list):
+    """ذخیره چندین ژانر"""
+    db = SessionLocal()
+    try:
+        # حذف ژانرهای قبلی
+        db.query(UserGenre).filter(UserGenre.user_id == user_id).delete()
+        
+        # اضافه کردن ژانرهای جدید
+        for genre in genres:
+            db.add(UserGenre(user_id=user_id, genre=genre))
+        
+        db.commit()
+        print(f"✅ {len(genres)} ژانر برای کاربر {user_id} ذخیره شد")
     finally:
         db.close()
 
