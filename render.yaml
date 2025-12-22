@@ -1,9 +1,12 @@
 services:
   - type: worker
     name: music-telegram-bot
-    env: docker  # تغییر از python به docker
+    env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # مهم: تنظیم تعداد instance به 1
+    numInstances: 1
+    plan: free  # یا starter
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -17,7 +20,9 @@ services:
         value: sqlite:///data/music_bot.db
       - key: DEFAULT_TIMEZONE
         value: Asia/Tehran
-    # برای ذخیره‌سازی دیتابیس (اختیاری)
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    # Persistent disk برای دیتابیس
     disk:
       name: bot-data
       mountPath: /app/data
