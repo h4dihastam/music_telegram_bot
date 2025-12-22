@@ -2,9 +2,9 @@ services:
   - type: worker
     name: music-telegram-bot
     runtime: docker
-    dockerfilePath: Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
-    # بسیار مهم: برای جلوگیری از خطای Conflict حتما باید 1 باشد
+    # برای worker نیازی به health check URL نیست
     numInstances: 1
     plan: free
     envVars:
@@ -22,7 +22,7 @@ services:
         value: Asia/Tehran
       - key: PYTHONUNBUFFERED
         value: "1"
-    # اتصال دیسک دائمی برای دیتابیس (تا با ریستارت پاک نشود)
+    # اتصال دیسک دائمی
     disk:
       name: bot-data
       mountPath: /app/data
