@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-ربات موزیک تلگرام - نقطه ورود اصلی
+ربات موزیک تلگرام - Fixed Version
 """
 import logging
 import sys
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler
 
@@ -12,12 +13,21 @@ from core.database import init_db
 from core.scheduler import setup_scheduler
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
 
-# تنظیم logging
+# تنظیم logging با جزئیات بیشتر
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log', encoding='utf-8') if os.path.exists('/app') else logging.StreamHandler()
+    ]
 )
+
+# کاهش noise از کتابخانه‌ها
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +38,7 @@ async def error_handler(update: Update, context):
     try:
         if update and update.effective_message:
             await update.effective_message.reply_text(
-                "❌ متأسفانه یه خطایی پیش اومد!\n"
+                "❌ متأسفانه یه مشکلی پیش اومد!\n"
                 "لطفاً دوباره امتحان کن یا /start بزن."
             )
     except Exception as e:
@@ -44,29 +54,30 @@ async def menu_command(update: Update, context):
 async def help_command(update: Update, context):
     """دستور /help"""
     help_text = """
-🎵 **راهنمای ربات موزیک روزانه**
+🎵 <b>راهنمای ربات موزیک روزانه</b>
 
-📋 **دستورات:**
-/start - شروع و تنظیمات اولیه
-/menu - منوی اصلی و تنظیمات
-/status - نمایش وضعیت فعلی
-/help - نمایش این راهنما
+📋 <b>دستورات:</b>
+/start - شروع و تنظیمات
+/menu - منوی اصلی
+/status - وضعیت فعلی
+/help - این راهنما
 
-🎯 **قابلیت‌ها:**
+🎯 <b>قابلیت‌ها:</b>
 ✅ انتخاب ژانر موسیقی
 ✅ ارسال خودکار روزانه
 ✅ ارسال به پیوی یا کانال
 ✅ دریافت متن آهنگ
-✅ دانلود فایل MP3
+✅ دانلود MP3
 
-💡 **نکات:**
-• هر روز در زمان انتخابی یک آهنگ جدید دریافت می‌کنی
-• می‌تونی چندین ژانر انتخاب کنی
-• برای ارسال به کانال، ربات باید ادمین کانال باشه
-
-❓ مشکلی داری؟ با /start دوباره تنظیم کن!
+💡 <b>نکات:</b>
+- هر روز در زمان انتخابی موزیک میگیری
+- می‌تونی چند ژانر انتخاب کنی
+- برای کانال، ربات باید ادمین باشه
     """
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(
+        help_text,
+        parse_mode='HTML'
+    )
 
 
 async def status_command(update: Update, context):
@@ -85,11 +96,11 @@ async def status_command(update: Update, context):
         if not settings:
             await update.message.reply_text(
                 "❌ هنوز تنظیماتی ثبت نکردی!\n\n"
-                "از /start استفاده کن تا شروع کنیم."
+                "از /start استفاده کن."
             )
             return
         
-        # ساخت fake query برای استفاده از show_status
+        # ساخت fake query
         class FakeQuery:
             async def answer(self): 
                 pass
@@ -102,23 +113,35 @@ async def status_command(update: Update, context):
         db.close()
 
 
+async def post_init(application: Application):
+    """بعد از راه‌اندازی"""
+    logger.info("🤖 ربات آماده است!")
+    logger.info(f"👤 Bot Username: @{application.bot.username}")
+
+
 def main():
     """راه‌اندازی ربات"""
     try:
-        logger.info("🚀 راه‌اندازی ربات...")
+        logger.info("="*60)
+        logger.info("🚀 شروع راه‌اندازی ربات موزیک...")
+        logger.info("="*60)
         
         # بررسی تنظیمات
+        logger.info("⚙️ بررسی تنظیمات...")
         config.validate()
         
-        # بررسی توکن
+        # چک توکن
         if not config.BOT_TOKEN:
-            logger.error("❌ BOT_TOKEN در environment variables موجود نیست!")
-            logger.error("لطفاً در Render Dashboard این متغیر رو اضافه کن")
+            logger.error("❌ BOT_TOKEN موجود نیست!")
+            logger.error("💡 توکن رو در Environment Variables تنظیم کن")
             sys.exit(1)
         
-        # راه‌اندازی دیتابیس
+        logger.info("✅ تنظیمات OK")
+        
+        # دیتابیس
         logger.info("🗄️ راه‌اندازی دیتابیس...")
         init_db()
+        logger.info("✅ دیتابیس OK")
         
         # ساخت Application
         logger.info("🤖 ساخت Application...")
@@ -127,40 +150,51 @@ def main():
         # ثبت handlers
         logger.info("📝 ثبت handlers...")
         
-        # Conversation handler برای /start
+        # Start conversation
         start_handler = get_start_conversation_handler()
         app.add_handler(start_handler)
+        logger.info("  ✓ Start handler")
         
-        # دستورات ساده
+        # دستورات
         app.add_handler(CommandHandler('menu', menu_command))
         app.add_handler(CommandHandler('help', help_command))
         app.add_handler(CommandHandler('status', status_command))
+        logger.info("  ✓ Command handlers")
         
         # Settings handlers
         for handler in get_settings_handlers():
             app.add_handler(handler)
+        logger.info("  ✓ Settings handlers")
         
         # Error handler
         app.add_error_handler(error_handler)
+        logger.info("  ✓ Error handler")
         
-        # راه‌اندازی Scheduler با JobQueue
+        # Scheduler
         logger.info("⏰ راه‌اندازی Scheduler...")
         scheduler = setup_scheduler(app.job_queue)
         app.bot_data['scheduler'] = scheduler
+        logger.info("✅ Scheduler OK")
         
-        # شروع ربات
-        logger.info("✅ ربات شروع به کار کرد!")
-        logger.info("📡 در حال گوش دادن به پیام‌ها...")
+        # Post init callback
+        app.post_init = post_init
+        
+        # شروع
+        logger.info("="*60)
+        logger.info("✅ تمام تنظیمات کامل شد!")
+        logger.info("📡 ربات در حال اجراست...")
         logger.info("⏹️ برای توقف: Ctrl+C")
+        logger.info("="*60)
         
-        # اجرای polling
+        # Run polling
         app.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            close_loop=False
         )
         
     except KeyboardInterrupt:
-        logger.info("⛔ ربات متوقف شد (KeyboardInterrupt)")
+        logger.info("\n⛔ ربات متوقف شد (KeyboardInterrupt)")
     except Exception as e:
         logger.error(f"❌ خطای کلی: {e}", exc_info=True)
         sys.exit(1)

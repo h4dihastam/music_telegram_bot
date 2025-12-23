@@ -4,26 +4,37 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # برای worker نیازی به health check URL نیست
     numInstances: 1
     plan: free
+    
     envVars:
       - key: BOT_TOKEN
         sync: false
+      
       - key: SPOTIFY_CLIENT_ID
         sync: false
+      
       - key: SPOTIFY_CLIENT_SECRET
         sync: false
+      
       - key: MUSIXMATCH_API_KEY
         sync: false
+      
       - key: DATABASE_URL
         value: sqlite:////app/data/music_bot.db
+      
       - key: DEFAULT_TIMEZONE
         value: Asia/Tehran
+      
       - key: PYTHONUNBUFFERED
         value: "1"
-    # اتصال دیسک دائمی
+      
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+    
     disk:
       name: bot-data
       mountPath: /app/data
       sizeGB: 1
+    
+    autoDeploy: true
