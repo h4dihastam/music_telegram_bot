@@ -5,9 +5,10 @@ python-dotenv==1.0.0
 pytz==2024.1
 
 # Spotify
-spotipy==2.23.0
+# تغییر مهم: نسخه دقیق را برداشتیم یا می‌توانید به >=2.24.0 تغییر دهید
+spotipy>=2.24.0
 
-# YouTube/Music Download - استفاده از spotdl
+# YouTube/Music Download
 spotdl==4.2.8
 
 # HTTP
