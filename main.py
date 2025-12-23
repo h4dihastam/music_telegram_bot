@@ -82,11 +82,13 @@ async def help_command(update: Update, context):
 
 async def status_command(update: Update, context):
     """دستور /status"""
-    from bot.handlers.settings import show_status
+    # نکته: به جای استفاده از show_status که برای دکمه‌ها طراحی شده،
+    # اینجا یک پیام ساده می‌فرستیم یا باید تابع show_status را اصلاح کنید
+    # که به update.callback_query وابسته نباشد.
+    
     from core.database import SessionLocal, UserSettings
     
     user_id = update.effective_user.id
-    
     db = SessionLocal()
     try:
         settings = db.query(UserSettings).filter(
@@ -94,21 +96,21 @@ async def status_command(update: Update, context):
         ).first()
         
         if not settings:
-            await update.message.reply_text(
-                "❌ هنوز تنظیماتی ثبت نکردی!\n\n"
-                "از /start استفاده کن."
-            )
+            await update.message.reply_text("❌ تنظیماتی یافت نشد. /start را بزنید.")
             return
+
+        # نمایش وضعیت به صورت متن ساده (بدون دکمه‌های شیشه‌ای پیچیده)
+        status_text = (
+            f"📊 <b>وضعیت ربات شما:</b>\n\n"
+            f"⏰ زمان ارسال: {settings.schedule_time}\n"
+            f"🎵 ژانرها: {settings.genres if settings.genres else 'همه'}\n"
+            f"active: {'✅' if settings.is_active else '❌'}"
+        )
+        await update.message.reply_text(status_text, parse_mode='HTML')
         
-        # ساخت fake query
-        class FakeQuery:
-            async def answer(self): 
-                pass
-            async def edit_message_text(self, **kwargs):
-                await update.message.reply_text(**kwargs)
-        
-        update.callback_query = FakeQuery()
-        await show_status(update, context)
+    except Exception as e:
+        logger.error(f"Status error: {e}")
+        await update.message.reply_text("خطایی در دریافت وضعیت رخ داد.")
     finally:
         db.close()
 
