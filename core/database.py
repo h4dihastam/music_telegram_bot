@@ -46,13 +46,12 @@ class UserSettings(Base):
     __tablename__ = 'user_settings'
     
     user_id = Column(Integer, ForeignKey('users.user_id'), primary_key=True)
-    send_time = Column(String(5), default='09:00')
+    send_time = Column(String(5), default='09:00')  # ✅ این درست است
     send_to = Column(String(10), default='private')
     channel_id = Column(String(50), nullable=True)
     timezone = Column(String(50), default='Asia/Tehran')
     
     user = relationship("User", back_populates="settings")
-
 
 class UserGenre(Base):
     __tablename__ = 'user_genres'
