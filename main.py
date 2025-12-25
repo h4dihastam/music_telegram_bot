@@ -82,11 +82,7 @@ async def help_command(update: Update, context):
 
 async def status_command(update: Update, context):
     """دستور /status"""
-    # نکته: به جای استفاده از show_status که برای دکمه‌ها طراحی شده،
-    # اینجا یک پیام ساده می‌فرستیم یا باید تابع show_status را اصلاح کنید
-    # که به update.callback_query وابسته نباشد.
-    
-    from core.database import SessionLocal, UserSettings
+    from core.database import SessionLocal, UserSettings, UserGenre
     
     user_id = update.effective_user.id
     db = SessionLocal()
@@ -99,17 +95,25 @@ async def status_command(update: Update, context):
             await update.message.reply_text("❌ تنظیماتی یافت نشد. /start را بزنید.")
             return
 
-        # نمایش وضعیت به صورت متن ساده (بدون دکمه‌های شیشه‌ای پیچیده)
+        # ✅ تغییر از schedule_time به send_time
+        genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
+        genre_list = ", ".join([g.genre for g in genres]) if genres else "انتخاب نشده"
+        
         status_text = (
             f"📊 <b>وضعیت ربات شما:</b>\n\n"
-            f"⏰ زمان ارسال: {settings.schedule_time}\n"
-            f"🎵 ژانرها: {settings.genres if settings.genres else 'همه'}\n"
-            f"active: {'✅' if settings.is_active else '❌'}"
+            f"⏰ زمان ارسال: {settings.send_time}\n"
+            f"🎵 ژانرها: {genre_list}\n"
+            f"📍 مقصد: {settings.send_to}\n"
+            f"🌍 منطقه زمانی: {settings.timezone}"
         )
+        
+        if settings.send_to == 'channel' and settings.channel_id:
+            status_text += f"\n📢 کانال: {settings.channel_id}"
+        
         await update.message.reply_text(status_text, parse_mode='HTML')
         
     except Exception as e:
-        logger.error(f"Status error: {e}")
+        logger.error(f"Status error: {e}", exc_info=True)
         await update.message.reply_text("خطایی در دریافت وضعیت رخ داد.")
     finally:
         db.close()
