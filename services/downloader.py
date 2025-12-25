@@ -1,15 +1,13 @@
 """
-Music Downloader با spotDL - بهترین کیفیت و سریع‌ترین
+Music Downloader با spotDL - نسخه اصلاح شده
 """
 import os
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime, timedelta
 
 from spotdl import Spotdl
-from spotdl.types.song import Song
-
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -23,13 +21,10 @@ class MusicDownloader:
         self.download_dir.mkdir(exist_ok=True)
         
         try:
-            # راه‌اندازی spotdl
+            # ✅ اصلاح شده: حذف آرگومان‌های output, format, bitrate که باعث خطا می‌شدند
             self.spotdl = Spotdl(
                 client_id=config.SPOTIFY_CLIENT_ID,
-                client_secret=config.SPOTIFY_CLIENT_SECRET,
-                output=str(self.download_dir),
-                format="mp3",
-                bitrate="192k",
+                client_secret=config.SPOTIFY_CLIENT_SECRET
             )
             logger.info("✅ SpotDL راه‌اندازی شد")
         except Exception as e:
@@ -40,6 +35,20 @@ class MusicDownloader:
         """چک کردن در دسترس بودن"""
         return self.spotdl is not None
     
+    def _change_dir_and_download(self, song_obj):
+        """تغییر مسیر موقت و دانلود"""
+        original_cwd = os.getcwd()
+        try:
+            # رفتن به پوشه دانلود قبل از شروع
+            os.chdir(self.download_dir)
+            results = self.spotdl.download(song_obj)
+            return results
+        except Exception as e:
+            raise e
+        finally:
+            # برگشتن به مسیر اصلی
+            os.chdir(original_cwd)
+
     def download_from_spotify_url(self, spotify_url: str) -> Optional[str]:
         """
         دانلود مستقیم از لینک Spotify
@@ -51,7 +60,7 @@ class MusicDownloader:
         try:
             logger.info(f"📥 دانلود از Spotify: {spotify_url}")
             
-            # دانلود
+            # جستجوی آهنگ
             songs = self.spotdl.search([spotify_url])
             
             if not songs:
@@ -59,13 +68,20 @@ class MusicDownloader:
                 return None
             
             song = songs[0]
-            results = self.spotdl.download(song)
+            # ✅ دانلود با مدیریت مسیر
+            results = self._change_dir_and_download(song)
             
-            if results and os.path.exists(results):
-                logger.info(f"✅ دانلود موفق: {results}")
-                return results
+            # بررسی نتیجه (spotdl معمولا یک لیست یا مسیر برمی‌گرداند)
+            if results:
+                # اگر لیست بود اولین آیتم، اگر نه خود مسیر
+                file_path = results[0] if isinstance(results, list) else results
+                full_path = self.download_dir / Path(file_path).name
+                
+                if full_path.exists():
+                    logger.info(f"✅ دانلود موفق: {full_path}")
+                    return str(full_path)
             
-            logger.warning("⚠️ فایل دانلود نشد")
+            logger.warning("⚠️ فایل دانلود شد اما پیدا نشد")
             return None
             
         except Exception as e:
@@ -94,11 +110,16 @@ class MusicDownloader:
                 return None
             
             song = songs[0]
-            results = self.spotdl.download(song)
+            # ✅ دانلود با مدیریت مسیر
+            results = self._change_dir_and_download(song)
             
-            if results and os.path.exists(results):
-                logger.info(f"✅ دانلود موفق")
-                return results
+            if results:
+                file_path = results[0] if isinstance(results, list) else results
+                full_path = self.download_dir / Path(file_path).name
+                
+                if full_path.exists():
+                    logger.info(f"✅ دانلود موفق")
+                    return str(full_path)
             
             return None
             
@@ -106,13 +127,8 @@ class MusicDownloader:
             logger.error(f"❌ خطا در دانلود: {e}")
             return None
     
-    def download_preview_from_spotify(
-        self, 
-        preview_url: str
-    ) -> Optional[str]:
-        """
-        دانلود preview 30 ثانیه (fallback نهایی)
-        """
+    def download_preview_from_spotify(self, preview_url: str) -> Optional[str]:
+        """دانلود preview 30 ثانیه"""
         try:
             import requests
             import hashlib
@@ -139,15 +155,16 @@ class MusicDownloader:
         """پاک کردن فایل‌های قدیمی"""
         now = datetime.now()
         deleted = 0
-        
         try:
+            if not self.download_dir.exists():
+                return
+                
             for file in self.download_dir.iterdir():
                 if file.is_file():
                     age = now - datetime.fromtimestamp(file.stat().st_mtime)
                     if age > timedelta(hours=max_age_hours):
                         file.unlink()
                         deleted += 1
-            
             if deleted > 0:
                 logger.info(f"🗑️ {deleted} فایل قدیمی پاک شد")
         except Exception as e:
@@ -164,24 +181,16 @@ def download_track_safe(
     spotify_url: Optional[str] = None,
     preview_url: Optional[str] = None
 ) -> Optional[str]:
-    """
-    دانلود ایمن با چند سطح fallback
-    """
-    # Cleanup قبل از دانلود
+    """دانلود ایمن با چند سطح fallback"""
     music_downloader.cleanup_old_files()
     
-    # روش 1: از لینک Spotify (بهترین کیفیت)
     if spotify_url:
         file_path = music_downloader.download_from_spotify_url(spotify_url)
-        if file_path:
-            return file_path
+        if file_path: return file_path
     
-    # روش 2: جستجو و دانلود
     file_path = music_downloader.download_by_search(track_name, artist_name)
-    if file_path:
-        return file_path
+    if file_path: return file_path
     
-    # روش 3: Preview 30 ثانیه (آخرین راه)
     if preview_url:
         logger.warning("⚠️ استفاده از preview (30 ثانیه)")
         return music_downloader.download_preview_from_spotify(preview_url)
