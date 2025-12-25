@@ -9,7 +9,8 @@ spotipy>=2.24.0
 
 # YouTube/Music Download
 spotdl==4.2.8
-yt-dlp==2024.4.9  # اضافه شد - برای دانلود بهتر
+yt-dlp==2024.4.9
+aiofiles==23.2.1  # اضافه شد
 
 # HTTP
 requests>=2.32.3

@@ -1,212 +1,187 @@
 """
-Music Downloader با spotDL - نسخه اصلاح شده و بهینه
+Music Downloader با spotDL - نسخه اصلاح شده با async
 """
 import os
 import logging
-import hashlib
-import requests
+import asyncio
+import aiohttp
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
+import subprocess
+import tempfile
 
-import spotdl
-from spotdl.types.options import DownloaderOptionalOptions
-from spotdl.types.song import Song
 from core.config import config
 
 logger = logging.getLogger(__name__)
 
 
 class MusicDownloader:
-    """دانلودر موزیک با spotDL"""
+    """دانلودر موزیک با استفاده از spotDL در subprocess"""
     
     def __init__(self):
         self.download_dir = config.DOWNLOADS_DIR
         self.download_dir.mkdir(exist_ok=True)
-        
-        try:
-            # تنظیمات دانلود
-            downloader_options = DownloaderOptionalOptions(
-                output=str(self.download_dir),
-                format='mp3',
-                bitrate='320k',
-                threads=2,
-                cookie_file=None,
-                sponsor_block=False,
-            )
-            
-            # راه‌اندازی spotDL با تنظیمات جدید
-            self.spotdl = spotdl.Spotdl(
-                client_id=config.SPOTIFY_CLIENT_ID,
-                client_secret=config.SPOTIFY_CLIENT_SECRET,
-                downloader_settings=downloader_options,
-                user_auth=False
-            )
-            logger.info("✅ SpotDL راه‌اندازی شد")
-        except Exception as e:
-            logger.error(f"❌ خطا در راه‌اندازی spotDL: {e}")
-            self.spotdl = None
     
     def is_available(self) -> bool:
-        """چک کردن در دسترس بودن"""
-        return self.spotdl is not None
-    
-    def _create_song_object(self, query: str) -> Optional[Song]:
-        """ایجاد شیء Song از query"""
+        """چک کردن در دسترس بودن spotDL"""
         try:
-            # جستجو و ایجاد Song object
-            songs = self.spotdl.search([query])
-            if songs and len(songs) > 0:
-                return songs[0]
-        except Exception as e:
-            logger.error(f"❌ خطا در ایجاد Song object: {e}")
-        return None
+            import spotdl
+            return True
+        except ImportError:
+            logger.warning("⚠️ spotDL نصب نیست")
+            return False
     
-    def download_from_spotify_url(self, spotify_url: str) -> Optional[str]:
+    async def download_from_spotify_url(self, spotify_url: str) -> Optional[str]:
         """
-        دانلود مستقیم از لینک Spotify
+        دانلود مستقیم از لینک Spotify با استفاده از subprocess
         """
-        if not self.is_available():
-            logger.error("❌ spotDL در دسترس نیست")
-            return None
-        
         try:
             logger.info(f"📥 دانلود از Spotify: {spotify_url}")
             
-            # ایجاد Song object از URL
-            songs = self.spotdl.search([spotify_url])
-            if not songs:
-                logger.warning("⚠️ آهنگ پیدا نشد")
-                return None
+            # ایجاد نام فایل خروجی
+            import hashlib
+            url_hash = hashlib.md5(spotify_url.encode()).hexdigest()[:8]
+            output_file = self.download_dir / f"song_{url_hash}.mp3"
             
-            song = songs[0]
+            # استفاده از spotDL در subprocess برای جلوگیری از تداخل event loop
+            cmd = [
+                "spotdl", "download",
+                spotify_url,
+                "--output", str(output_file),
+                "--format", "mp3",
+                "--bitrate", "320k"
+            ]
             
-            # دانلود آهنگ
-            results = self.spotdl.download(song)
+            # اضافه کردن credentials اگر موجود باشد
+            if config.SPOTIFY_CLIENT_ID and config.SPOTIFY_CLIENT_SECRET:
+                cmd.extend([
+                    "--client-id", config.SPOTIFY_CLIENT_ID,
+                    "--client-secret", config.SPOTIFY_CLIENT_SECRET
+                ])
             
-            if results:
-                # نتایج می‌تواند لیست مسیرها باشد
-                file_paths = results if isinstance(results, list) else [results]
+            logger.info(f"🚀 اجرای دستور: {' '.join(cmd)}")
+            
+            # اجرای فرآیند
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                logger.info("✅ دانلود با موفقیت انجام شد")
                 
-                for file_path in file_paths:
-                    if isinstance(file_path, str) and os.path.exists(file_path):
-                        logger.info(f"✅ دانلود موفق: {file_path}")
-                        return file_path
-                    
-                    # اگر مسیر نسبی است، مطلقش کن
-                    full_path = self.download_dir / Path(file_path).name
-                    if full_path.exists():
-                        logger.info(f"✅ دانلود موفق: {full_path}")
-                        return str(full_path)
-            
-            logger.warning("⚠️ فایل دانلود شد اما پیدا نشد")
-            return None
-            
+                # یافتن فایل دانلود شده
+                if output_file.exists():
+                    return str(output_file)
+                
+                # جستجو برای فایل جدید در پوشه دانلود
+                for file in self.download_dir.iterdir():
+                    if file.suffix in ['.mp3', '.m4a', '.webm']:
+                        # اگر فایل جدیدی پیدا شد
+                        file_age = datetime.now() - datetime.fromtimestamp(file.stat().st_mtime)
+                        if file_age < timedelta(minutes=5):
+                            logger.info(f"✅ فایل پیدا شد: {file.name}")
+                            return str(file)
+            else:
+                logger.error(f"❌ خطا در spotDL: {stderr.decode()}")
+                
         except Exception as e:
             logger.error(f"❌ خطا در دانلود از Spotify: {e}")
-            return None
+        
+        return None
     
-    def download_by_search(self, track_name: str, artist_name: str) -> Optional[str]:
+    async def download_by_search(self, track_name: str, artist_name: str) -> Optional[str]:
         """
         دانلود با جستجو
         """
-        if not self.is_available():
-            return None
-        
         try:
-            query = f"{artist_name} {track_name}"
+            query = f"{artist_name} - {track_name}"
             logger.info(f"🔍 جستجو و دانلود: {query}")
             
-            # جستجوی آهنگ
-            songs = self.spotdl.search([query])
-            if not songs:
-                logger.warning("⚠️ نتیجه‌ای پیدا نشد")
-                return None
+            # ایجاد نام فایل
+            import hashlib
+            query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+            output_file = self.download_dir / f"song_{query_hash}.mp3"
             
-            song = songs[0]
-            logger.info(f"🎵 آهنگ پیدا شد: {song.display_name}")
+            # استفاده از spotDL برای جستجو
+            cmd = [
+                "spotdl", "download",
+                f"{query}",
+                "--output", str(output_file),
+                "--format", "mp3"
+            ]
             
-            # دانلود آهنگ
-            results = self.spotdl.download(song)
+            if config.SPOTIFY_CLIENT_ID and config.SPOTIFY_CLIENT_SECRET:
+                cmd.extend([
+                    "--client-id", config.SPOTIFY_CLIENT_ID,
+                    "--client-secret", config.SPOTIFY_CLIENT_SECRET
+                ])
             
-            if results:
-                file_paths = results if isinstance(results, list) else [results]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                if output_file.exists():
+                    return str(output_file)
                 
-                for file_path in file_paths:
-                    if isinstance(file_path, str) and os.path.exists(file_path):
-                        logger.info(f"✅ دانلود موفق: {file_path}")
-                        return file_path
-                    
-                    full_path = self.download_dir / Path(file_path).name
-                    if full_path.exists():
-                        logger.info(f"✅ دانلود موفق: {full_path}")
-                        return str(full_path)
-            
-            return None
-            
+                # جستجوی فایل جدید
+                for file in self.download_dir.iterdir():
+                    if file.suffix in ['.mp3', '.m4a']:
+                        file_age = datetime.now() - datetime.fromtimestamp(file.stat().st_mtime)
+                        if file_age < timedelta(minutes=5):
+                            return str(file)
+            else:
+                logger.warning(f"⚠️ جستجو ناموفق: {stderr.decode()}")
+                
         except Exception as e:
             logger.error(f"❌ خطا در دانلود: {e}")
-            return None
+        
+        return None
     
-    def download_preview_from_spotify(self, preview_url: str) -> Optional[str]:
+    async def download_preview_from_spotify(self, preview_url: str) -> Optional[str]:
         """دانلود preview 30 ثانیه"""
         try:
-            import urllib.parse
+            import aiofiles
+            import hashlib
             
-            # نام فایل را از URL بساز
-            parsed_url = urllib.parse.urlparse(preview_url)
-            path = parsed_url.path
-            track_id = os.path.basename(path).replace('.mp3', '')
-            
-            file_name = f"preview_{track_id}.mp3"
+            # نام فایل
+            url_hash = hashlib.md5(preview_url.encode()).hexdigest()[:8]
+            file_name = f"preview_{url_hash}.mp3"
             file_path = self.download_dir / file_name
             
-            # اگر قبلاً دانلود شده، برگردان
+            # اگر قبلاً دانلود شده
             if file_path.exists():
                 logger.info(f"✅ Preview از کش بازیابی شد")
                 return str(file_path)
             
             logger.info("📥 دانلود preview از Spotify...")
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = requests.get(preview_url, headers=headers, timeout=30)
-            response.raise_for_status()
-            
-            # ذخیره فایل
-            with open(file_path, 'wb') as f:
-                f.write(response.content)
-            
-            logger.info("✅ Preview دانلود شد")
-            return str(file_path)
-            
-        except requests.exceptions.Timeout:
+            # دانلود async
+            async with aiohttp.ClientSession() as session:
+                async with session.get(preview_url, timeout=30) as response:
+                    if response.status == 200:
+                        async with aiofiles.open(file_path, 'wb') as f:
+                            await f.write(await response.read())
+                        logger.info("✅ Preview دانلود شد")
+                        return str(file_path)
+                    else:
+                        logger.error(f"❌ خطا در دریافت preview: {response.status}")
+                        
+        except asyncio.TimeoutError:
             logger.error("❌ تایم‌اوت در دانلود preview")
-            return None
         except Exception as e:
             logger.error(f"❌ خطا در دانلود preview: {e}")
-            return None
-    
-    def get_file_info(self, file_path: str) -> Dict[str, Any]:
-        """دریافت اطلاعات فایل"""
-        try:
-            if not os.path.exists(file_path):
-                return {}
-            
-            stat = os.stat(file_path)
-            size_mb = stat.st_size / (1024 * 1024)
-            
-            return {
-                'path': file_path,
-                'size_mb': round(size_mb, 2),
-                'modified': datetime.fromtimestamp(stat.st_mtime),
-                'exists': True
-            }
-        except Exception as e:
-            logger.error(f"❌ خطا در دریافت اطلاعات فایل: {e}")
-            return {}
+        
+        return None
     
     def cleanup_old_files(self, max_age_hours: int = 6):
         """پاک کردن فایل‌های قدیمی"""
@@ -216,11 +191,11 @@ class MusicDownloader:
         try:
             if not self.download_dir.exists():
                 return
-                
+            
             for file in self.download_dir.iterdir():
                 if file.is_file():
-                    # فقط فایل‌های موقت یا preview را پاک کن
-                    if file.name.startswith('preview_') or file.name.endswith('.temp'):
+                    # پاک کردن فایل‌های قدیمی
+                    if file.name.startswith('preview_') or file.name.startswith('song_'):
                         age = now - datetime.fromtimestamp(file.stat().st_mtime)
                         if age > timedelta(hours=max_age_hours):
                             try:
@@ -241,14 +216,14 @@ class MusicDownloader:
 music_downloader = MusicDownloader()
 
 
-def download_track_safe(
+async def download_track_safe_async(
     track_name: str,
     artist_name: str,
     spotify_url: Optional[str] = None,
     preview_url: Optional[str] = None
 ) -> Optional[str]:
     """
-    دانلود ایمن با چند سطح fallback
+    دانلود ایمن با چند سطح fallback (نسخه async)
     Returns: مسیر فایل دانلود شده یا None
     """
     
@@ -258,14 +233,14 @@ def download_track_safe(
     # استراتژی ۱: دانلود از Spotify URL
     if spotify_url:
         logger.info("🎯 تلاش برای دانلود از Spotify URL...")
-        file_path = music_downloader.download_from_spotify_url(spotify_url)
+        file_path = await music_downloader.download_from_spotify_url(spotify_url)
         if file_path:
             logger.info("✅ دانلود از Spotify URL موفق بود")
             return file_path
     
     # استراتژی ۲: دانلود با جستجو
     logger.info("🎯 تلاش برای دانلود با جستجو...")
-    file_path = music_downloader.download_by_search(track_name, artist_name)
+    file_path = await music_downloader.download_by_search(track_name, artist_name)
     if file_path:
         logger.info("✅ دانلود با جستجو موفق بود")
         return file_path
@@ -273,7 +248,7 @@ def download_track_safe(
     # استراتژی ۳: دانلود preview (30 ثانیه)
     if preview_url:
         logger.info("🎯 تلاش برای دانلود preview...")
-        file_path = music_downloader.download_preview_from_spotify(preview_url)
+        file_path = await music_downloader.download_preview_from_spotify(preview_url)
         if file_path:
             logger.warning("⚠️ فقط preview 30 ثانیه‌ای دانلود شد")
             return file_path
@@ -282,22 +257,24 @@ def download_track_safe(
     return None
 
 
-def validate_download_file(file_path: str, min_size_kb: int = 100) -> bool:
-    """اعتبارسنجی فایل دانلود شده"""
+# نسخه sync برای compatibility با کدهای قدیمی
+def download_track_safe(
+    track_name: str,
+    artist_name: str,
+    spotify_url: Optional[str] = None,
+    preview_url: Optional[str] = None
+) -> Optional[str]:
+    """
+    wrapper برای سازگاری با کدهای sync
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        if not file_path or not os.path.exists(file_path):
-            return False
-        
-        size_kb = os.path.getsize(file_path) / 1024
-        if size_kb < min_size_kb:
-            logger.warning(f"⚠️ فایل بسیار کوچک است: {size_kb:.1f}KB")
-            os.remove(file_path)
-            return False
-        
-        return True
-    except Exception as e:
-        logger.error(f"❌ خطا در اعتبارسنجی فایل: {e}")
-        return False
+        return loop.run_until_complete(
+            download_track_safe_async(track_name, artist_name, spotify_url, preview_url)
+        )
+    finally:
+        loop.close()
 
 
 # تست ساده
@@ -307,16 +284,16 @@ if __name__ == "__main__":
     # تنظیم logging
     logging.basicConfig(level=logging.INFO)
     
-    if music_downloader.is_available():
-        print("✅ Downloader در دسترس است")
-        
-        # تست دانلود preview (برای تست سریع)
-        test_url = "https://p.scdn.co/mp3-preview/..."
-        print(f"🔍 تست دانلود preview...")
-        
-        result = music_downloader.download_preview_from_spotify(
-            "https://p.scdn.co/mp3-preview/ab12c3d4e5f67890123456789abcdef01234567"
+    # تست دانلود preview
+    import asyncio
+    loop = asyncio.new_event_loop()
+    
+    async def test():
+        result = await download_track_safe_async(
+            "Test Song",
+            "Test Artist",
+            preview_url="https://p.scdn.co/mp3-preview/ab12c3d4e5f67890123456789abcdef01234567"
         )
         print(f"نتیجه: {result}")
-    else:
-        print("❌ Downloader در دسترس نیست - تنظیمات را چک کنید")
+    
+    loop.run_until_complete(test())
