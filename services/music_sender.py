@@ -1,5 +1,5 @@
 """
-Music Sender - ارسال موزیک (Fixed)
+Music Sender - ارسال موزیک (Fixed with async downloader)
 """
 import logging
 import os
@@ -11,7 +11,7 @@ from telegram.constants import ParseMode
 from core.database import SessionLocal, SentTrack
 from services.spotify import get_random_track_for_user
 from services.musixmatch import get_track_lyrics
-from services.downloader import download_track_safe
+from services.downloader import download_track_safe_async  # ✅ تغییر به async
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,8 @@ async def send_music_to_user(
         if download_file:
             try:
                 logger.info("📥 شروع دانلود فایل...")
-                file_path = download_track_safe(
+                # ✅ تغییر به await
+                file_path = await download_track_safe_async(
                     track_name=track_info['name'],
                     artist_name=track_info['artist_str'],
                     spotify_url=track_info['links'].get('spotify'),
