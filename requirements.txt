@@ -3,15 +3,14 @@ python-telegram-bot[job-queue]==20.8
 sqlalchemy==2.0.25
 python-dotenv==1.0.0
 pytz==2024.1
+aiohttp==3.9.3
 
 # Spotify
 spotipy>=2.24.0
 
 # YouTube/Music Download
-spotdl==4.2.8
-yt-dlp==2024.4.9
-aiofiles==23.2.1  # اضافه شد
+yt-dlp>=2024.11.0
+aiofiles
 
 # HTTP
 requests>=2.32.3
-aiohttp==3.9.3
