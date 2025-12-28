@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-ربات موزیک تلگرام - Fixed Version
+ربات موزیک تلگرام - با Health Check
 """
 import logging
 import sys
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler
+from aiohttp import web
+import asyncio
 
 from core.config import config
 from core.database import init_db
 from core.scheduler import setup_scheduler
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
 
-# تنظیم logging با جزئیات بیشتر
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -23,12 +24,31 @@ logging.basicConfig(
     ]
 )
 
-# کاهش noise از کتابخانه‌ها
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+
+# ✅ Health Check Server برای Render
+async def health_check(request):
+    """Endpoint برای health check"""
+    return web.Response(text="Bot is running!", status=200)
+
+
+async def start_health_server():
+    """راه‌اندازی HTTP server برای health check"""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    port = int(os.getenv('PORT', 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"✅ Health server running on port {port}")
 
 
 async def error_handler(update: Update, context):
@@ -95,7 +115,6 @@ async def status_command(update: Update, context):
             await update.message.reply_text("❌ تنظیماتی یافت نشد. /start را بزنید.")
             return
 
-        # ✅ تغییر از schedule_time به send_time
         genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
         genre_list = ", ".join([g.genre for g in genres]) if genres else "انتخاب نشده"
         
@@ -132,71 +151,62 @@ def main():
         logger.info("🚀 شروع راه‌اندازی ربات موزیک...")
         logger.info("="*60)
         
-        # بررسی تنظیمات
         logger.info("⚙️ بررسی تنظیمات...")
         config.validate()
         
-        # چک توکن
         if not config.BOT_TOKEN:
             logger.error("❌ BOT_TOKEN موجود نیست!")
-            logger.error("💡 توکن رو در Environment Variables تنظیم کن")
             sys.exit(1)
         
         logger.info("✅ تنظیمات OK")
         
-        # دیتابیس
         logger.info("🗄️ راه‌اندازی دیتابیس...")
         init_db()
         logger.info("✅ دیتابیس OK")
         
-        # ساخت Application
         logger.info("🤖 ساخت Application...")
         app = Application.builder().token(config.BOT_TOKEN).build()
         
-        # ثبت handlers
         logger.info("📝 ثبت handlers...")
         
-        # Start conversation
         start_handler = get_start_conversation_handler()
         app.add_handler(start_handler)
         logger.info("  ✓ Start handler")
         
-        # دستورات
         app.add_handler(CommandHandler('menu', menu_command))
         app.add_handler(CommandHandler('help', help_command))
         app.add_handler(CommandHandler('status', status_command))
         logger.info("  ✓ Command handlers")
         
-        # Settings handlers
         for handler in get_settings_handlers():
             app.add_handler(handler)
         logger.info("  ✓ Settings handlers")
         
-        # Error handler
         app.add_error_handler(error_handler)
         logger.info("  ✓ Error handler")
         
-        # Scheduler
         logger.info("⏰ راه‌اندازی Scheduler...")
         scheduler = setup_scheduler(app.job_queue)
         app.bot_data['scheduler'] = scheduler
         logger.info("✅ Scheduler OK")
         
-        # Post init callback
         app.post_init = post_init
         
-        # شروع
         logger.info("="*60)
         logger.info("✅ تمام تنظیمات کامل شد!")
-        logger.info("📡 ربات در حال اجراست...")
-        logger.info("⏹️ برای توقف: Ctrl+C")
         logger.info("="*60)
         
-        # Run polling
+        # ✅ اجرای همزمان bot و health server
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # شروع health server
+        loop.run_until_complete(start_health_server())
+        
+        # شروع bot
         app.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            close_loop=False
+            drop_pending_updates=True
         )
         
     except KeyboardInterrupt:
