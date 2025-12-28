@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: music-telegram-bot
     runtime: docker
     dockerfilePath: ./Dockerfile
@@ -7,6 +7,7 @@ services:
     numInstances: 1
     plan: free
     
+    # Environment Variables
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -20,6 +21,7 @@ services:
       - key: MUSIXMATCH_API_KEY
         sync: false
       
+      # استفاده از SQLite با volume
       - key: DATABASE_URL
         value: sqlite:////app/data/music_bot.db
       
@@ -31,10 +33,24 @@ services:
       
       - key: PYTHONDONTWRITEBYTECODE
         value: "1"
+      
+      # پورت برای health check
+      - key: PORT
+        value: "8080"
     
+    # Persistent Disk - مهم!
     disk:
-      name: bot-data
+      name: bot-persistent-data
       mountPath: /app/data
       sizeGB: 1
     
+    # Health Check
+    healthCheckPath: /health
+    
     autoDeploy: true
+
+# توضیحات:
+# 1. type: web (نه worker) برای health check
+# 2. disk با mountPath /app/data برای ماندگاری دیتا
+# 3. healthCheckPath برای چک کردن وضعیت ربات
+# 4. DATABASE_URL به /app/data اشاره داره که روی disk نگه‌داری میشه
