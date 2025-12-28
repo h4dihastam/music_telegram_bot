@@ -1,17 +1,15 @@
 """
-Music Downloader - با چند منبع
+Music Downloader - با SoundCloud بهبود یافته
 """
 import os
 import logging
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
 import hashlib
 import aiohttp
 import aiofiles
-import re
 
 from core.config import config
 
@@ -19,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MusicDownloader:
-    """دانلودر موزیک از چند منبع"""
+    """دانلودر موزیک از چند منبع با اولویت SoundCloud"""
     
     def __init__(self):
         self.download_dir = config.DOWNLOADS_DIR
@@ -31,134 +29,96 @@ class MusicDownloader:
         track_name: str, 
         artist_name: str
     ) -> Optional[str]:
-        """دانلود از SoundCloud با yt-dlp"""
+        """دانلود از SoundCloud با yt-dlp - بهبود یافته"""
         try:
-            query = f"{artist_name} {track_name}"
-            logger.info(f"🔍 جستجو در SoundCloud: {query}")
-            
-            # نام فایل خروجی
-            query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
-            output_template = str(self.download_dir / f"sc_{query_hash}.%(ext)s")
-            
-            # دستور yt-dlp برای SoundCloud
-            cmd = [
-                'yt-dlp',
-                f'scsearch1:{query}',  # جستجو در SoundCloud
-                '--extract-audio',
-                '--audio-format', 'mp3',
-                '--audio-quality', '0',
-                '--output', output_template,
-                '--no-playlist',
-                '--quiet',
-                '--no-warnings',
-                '--no-check-certificates'
+            # جستجوهای مختلف برای افزایش شانس پیدا کردن
+            search_queries = [
+                f"{artist_name} {track_name}",
+                f"{track_name} {artist_name}",
+                f"{artist_name} - {track_name}",
             ]
             
-            logger.info("📥 دانلود از SoundCloud...")
-            
-            # اجرای async با timeout
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=60  # 60 ثانیه تایم‌اوت
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                logger.error("❌ تایم‌اوت دانلود از SoundCloud")
-                return None
-            
-            if process.returncode == 0:
-                # پیدا کردن فایل دانلود شده
-                for file in self.download_dir.iterdir():
-                    if file.stem.startswith(f"sc_{query_hash}"):
-                        logger.info(f"✅ دانلود از SoundCloud موفق: {file.name}")
-                        return str(file)
-            else:
-                error_msg = stderr.decode()[:200]
-                logger.warning(f"⚠️ SoundCloud ناموفق: {error_msg}")
+            for query in search_queries:
+                logger.info(f"🔍 SoundCloud: جستجو '{query}'")
                 
-        except Exception as e:
-            logger.error(f"❌ خطا در دانلود از SoundCloud: {e}")
-        
-        return None
-    
-    async def download_from_generic_search(
-        self, 
-        track_name: str, 
-        artist_name: str
-    ) -> Optional[str]:
-        """جستجو و دانلود از منابع عمومی (بدون YouTube)"""
-        try:
-            query = f"{artist_name} {track_name}"
-            logger.info(f"🔍 جستجوی عمومی: {query}")
-            
-            query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
-            output_template = str(self.download_dir / f"gen_{query_hash}.%(ext)s")
-            
-            # yt-dlp می‌تونه از سایت‌های مختلف دانلود کنه
-            cmd = [
-                'yt-dlp',
-                '--default-search', 'ytsearch',  # fallback
-                '--extract-audio',
-                '--audio-format', 'mp3',
-                '--audio-quality', '0',
-                '--output', output_template,
-                '--max-downloads', '1',
-                '--no-playlist',
-                '--quiet',
-                '--no-warnings',
-                '--no-check-certificates',
-                '--geo-bypass',  # دور زدن محدودیت جغرافیایی
-                f'{query} audio'
-            ]
-            
-            logger.info("📥 دانلود از منابع عمومی...")
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=60
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                logger.error("❌ تایم‌اوت")
-                return None
-            
-            if process.returncode == 0:
+                query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
+                output_template = str(self.download_dir / f"sc_{query_hash}.%(ext)s")
+                
+                # بررسی کش
                 for file in self.download_dir.iterdir():
-                    if file.stem.startswith(f"gen_{query_hash}"):
-                        logger.info(f"✅ دانلود موفق: {file.name}")
+                    if file.stem.startswith(f"sc_{query_hash}") and file.suffix == '.mp3':
+                        logger.info(f"✅ از کش: {file.name}")
                         return str(file)
-                        
+                
+                # دستور yt-dlp برای SoundCloud
+                cmd = [
+                    'yt-dlp',
+                    f'scsearch3:{query}',  # 3 نتیجه اول
+                    '--extract-audio',
+                    '--audio-format', 'mp3',
+                    '--audio-quality', '0',
+                    '--output', output_template,
+                    '--no-playlist',
+                    '--quiet',
+                    '--no-warnings',
+                    '--no-check-certificates',
+                    '--max-downloads', '1',  # فقط اولین نتیجه
+                    '--socket-timeout', '30',
+                ]
+                
+                logger.info("📥 دانلود از SoundCloud...")
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=45
+                    )
+                except asyncio.TimeoutError:
+                    process.kill()
+                    logger.warning(f"⏱️ تایم‌اوت برای '{query}'")
+                    continue
+                
+                if process.returncode == 0:
+                    # پیدا کردن فایل دانلود شده
+                    for file in self.download_dir.iterdir():
+                        if file.stem.startswith(f"sc_{query_hash}") and file.suffix == '.mp3':
+                            logger.info(f"✅ SoundCloud موفق: {file.name}")
+                            return str(file)
+                else:
+                    logger.debug(f"⚠️ SoundCloud ناموفق برای '{query}'")
+                    continue
+            
+            logger.warning("❌ SoundCloud: هیچ نتیجه‌ای پیدا نشد")
+            
         except Exception as e:
-            logger.error(f"❌ خطا در دانلود: {e}")
+            logger.error(f"❌ خطا در SoundCloud: {e}")
         
         return None
     
-    async def download_from_alternative_youtube(
+    async def download_from_youtube(
         self,
         track_name: str,
         artist_name: str
     ) -> Optional[str]:
-        """دانلود از YouTube با proxy و تنظیمات بیشتر"""
+        """دانلود از YouTube"""
         try:
-            query = f"{artist_name} {track_name} audio"
-            logger.info(f"🔍 YouTube (تنظیمات پیشرفته): {query}")
+            query = f"{artist_name} {track_name} official audio"
+            logger.info(f"🔍 YouTube: '{query}'")
             
             query_hash = hashlib.md5(query.encode()).hexdigest()[:8]
             output_template = str(self.download_dir / f"yt_{query_hash}.%(ext)s")
+            
+            # بررسی کش
+            for file in self.download_dir.iterdir():
+                if file.stem.startswith(f"yt_{query_hash}") and file.suffix == '.mp3':
+                    logger.info(f"✅ از کش: {file.name}")
+                    return str(file)
             
             cmd = [
                 'yt-dlp',
@@ -171,13 +131,11 @@ class MusicDownloader:
                 '--quiet',
                 '--no-warnings',
                 '--no-check-certificates',
-                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                '--extractor-retries', '3',
-                '--geo-bypass',
-                '--force-ipv4'
+                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                '--socket-timeout', '30',
             ]
             
-            logger.info("📥 تلاش دانلود از YouTube...")
+            logger.info("📥 دانلود از YouTube...")
             
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -192,12 +150,13 @@ class MusicDownloader:
                 )
             except asyncio.TimeoutError:
                 process.kill()
+                logger.warning("⏱️ YouTube تایم‌اوت")
                 return None
             
             if process.returncode == 0:
                 for file in self.download_dir.iterdir():
-                    if file.stem.startswith(f"yt_{query_hash}"):
-                        logger.info(f"✅ YouTube موفق شد")
+                    if file.stem.startswith(f"yt_{query_hash}") and file.suffix == '.mp3':
+                        logger.info(f"✅ YouTube موفق: {file.name}")
                         return str(file)
                         
         except Exception as e:
@@ -206,7 +165,7 @@ class MusicDownloader:
         return None
     
     async def download_preview_from_spotify(self, preview_url: str) -> Optional[str]:
-        """دانلود preview 30 ثانیه از Spotify"""
+        """دانلود preview 30 ثانیه از Spotify (آخرین گزینه)"""
         try:
             file_hash = hashlib.md5(preview_url.encode()).hexdigest()[:8]
             file_name = f"preview_{file_hash}.mp3"
@@ -216,7 +175,7 @@ class MusicDownloader:
                 logger.info("✅ Preview از کش")
                 return str(file_path)
             
-            logger.info("📥 دانلود Spotify Preview...")
+            logger.info("📥 دانلود Spotify Preview (30s)...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(preview_url, timeout=30) as response:
@@ -241,7 +200,7 @@ class MusicDownloader:
                 return
             
             for file in self.download_dir.iterdir():
-                if file.is_file():
+                if file.is_file() and file.suffix == '.mp3':
                     age = now - datetime.fromtimestamp(file.stat().st_mtime)
                     if age > timedelta(hours=max_age_hours):
                         try:
@@ -268,49 +227,66 @@ async def download_track_safe_async(
     preview_url: Optional[str] = None
 ) -> Optional[str]:
     """
-    دانلود با چند سطح fallback:
-    1. SoundCloud
-    2. YouTube (با تنظیمات پیشرفته)
-    3. منابع عمومی
-    4. Spotify Preview
+    دانلود با استراتژی بهینه:
+    1. SoundCloud (بهترین کیفیت + کامل)
+    2. YouTube (معمولاً موفق)
+    3. Spotify Preview (30 ثانیه - آخرین راه)
+    
+    Returns:
+        مسیر فایل یا None
     """
     
-    music_downloader.cleanup_old_files()
+    # پاکسازی فایل‌های قدیمی
+    music_downloader.cleanup_old_files(max_age_hours=3)
     
-    # استراتژی 1: SoundCloud (بهترین گزینه)
-    logger.info("🎯 استراتژی 1: SoundCloud")
+    logger.info(f"🎵 شروع دانلود: {track_name} - {artist_name}")
+    
+    # استراتژی 1: SoundCloud (اولویت اول)
+    logger.info("🎯 استراتژی 1/3: SoundCloud")
     file_path = await music_downloader.download_from_soundcloud(
         track_name, artist_name
     )
-    if file_path:
-        logger.info("✅ دانلود از SoundCloud موفق")
+    if file_path and os.path.exists(file_path):
+        logger.info(f"✅ موفق از SoundCloud: {os.path.basename(file_path)}")
         return file_path
     
-    # استراتژی 2: YouTube با تنظیمات پیشرفته
-    logger.info("🎯 استراتژی 2: YouTube پیشرفته")
-    file_path = await music_downloader.download_from_alternative_youtube(
+    # استراتژی 2: YouTube
+    logger.info("🎯 استراتژی 2/3: YouTube")
+    file_path = await music_downloader.download_from_youtube(
         track_name, artist_name
     )
-    if file_path:
-        logger.info("✅ دانلود از YouTube موفق")
+    if file_path and os.path.exists(file_path):
+        logger.info(f"✅ موفق از YouTube: {os.path.basename(file_path)}")
         return file_path
     
-    # استراتژی 3: منابع عمومی
-    logger.info("🎯 استراتژی 3: منابع عمومی")
-    file_path = await music_downloader.download_from_generic_search(
-        track_name, artist_name
-    )
-    if file_path:
-        logger.info("✅ دانلود از منابع عمومی موفق")
-        return file_path
-    
-    # استراتژی 4: Spotify Preview (آخرین راه)
+    # استراتژی 3: Spotify Preview (آخرین راه - فقط 30 ثانیه)
     if preview_url:
-        logger.info("🎯 استراتژی 4: Spotify Preview")
+        logger.info("🎯 استراتژی 3/3: Spotify Preview")
         file_path = await music_downloader.download_preview_from_spotify(preview_url)
-        if file_path:
-            logger.warning("⚠️ فقط Preview 30 ثانیه")
+        if file_path and os.path.exists(file_path):
+            logger.warning("⚠️ فقط Preview 30 ثانیه موجود بود")
             return file_path
     
     logger.error("❌ همه روش‌های دانلود شکست خوردند")
     return None
+
+
+# تست
+if __name__ == "__main__":
+    import asyncio
+    
+    async def test():
+        print("🧪 تست Downloader...")
+        
+        # تست SoundCloud
+        result = await download_track_safe_async(
+            "Blinding Lights",
+            "The Weeknd"
+        )
+        
+        if result:
+            print(f"✅ دانلود موفق: {result}")
+        else:
+            print("❌ دانلود ناموفق")
+    
+    asyncio.run(test())
