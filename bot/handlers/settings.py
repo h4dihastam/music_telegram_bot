@@ -1,18 +1,20 @@
 """
-Handler برای تنظیمات و منوی اصلی
+Handler برای تنظیمات و منوی اصلی - FIXED
 """
 import random
 import logging
 from telegram import Update
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 
 from core.database import SessionLocal, UserSettings, UserGenre
 from bot.keyboards.inline import (
     get_main_menu_keyboard,
     get_time_selection_keyboard,
-    get_destination_keyboard
+    get_destination_keyboard,
+    get_back_to_menu_button
 )
 from bot.handlers.genre import show_genre_selection
+from bot.states import SETTING_TIME
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,8 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             text="⏰ زمان ارسال روزانه رو انتخاب کن:",
             reply_markup=get_time_selection_keyboard()
         )
+        # ✅ ذخیره state برای بعد
+        context.user_data['changing_time_from_menu'] = True
         
     elif data == "menu_change_dest":
         await query.edit_message_text(
@@ -102,7 +106,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def change_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """تغییر زمان"""
+    """تغییر زمان - FIXED"""
     query = update.callback_query
     await query.answer()
     
@@ -110,6 +114,18 @@ async def change_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     
     if data.startswith("time_"):
+        if data == "time_custom":
+            # ✅ درخواست زمان سفارشی
+            await query.edit_message_text(
+                text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست\n\n"
+                     "مثال: 09:30, 14:00, 21:45",
+                reply_markup=get_back_to_menu_button()
+            )
+            # ذخیره که منتظر ورودی کاربر هستیم
+            context.user_data['waiting_for_custom_time'] = True
+            return
+        
+        # زمان‌های از پیش تعیین شده
         send_time = data.split("_")[1]
         
         db = SessionLocal()
@@ -131,6 +147,56 @@ async def change_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
         finally:
             db.close()
+
+
+async def custom_time_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت زمان سفارشی از کاربر - FIXED"""
+    # چک کنیم که واقعاً منتظر زمان بودیم
+    if not context.user_data.get('waiting_for_custom_time'):
+        return
+    
+    from utils.helpers import validate_time_format
+    
+    time_str = update.message.text.strip()
+    user_id = update.effective_user.id
+    
+    # اعتبارسنجی
+    if not validate_time_format(time_str):
+        await update.message.reply_text(
+            "❌ فرمت زمان اشتباه است!\n\n"
+            "لطفاً به فرمت HH:MM وارد کنید (مثل 09:30)",
+            reply_markup=get_back_to_menu_button()
+        )
+        return
+    
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if settings:
+            # ✅ ذخیره زمان واقعی
+            settings.send_time = time_str
+            db.commit()
+            
+            # تنظیم scheduler
+            scheduler = context.bot_data.get('scheduler')
+            if scheduler:
+                from core.scheduler import schedule_user_daily_music_helper
+                schedule_user_daily_music_helper(user_id, scheduler)
+            
+            await update.message.reply_text(
+                text=f"✅ زمان ارسال به {time_str} تغییر کرد!",
+                reply_markup=get_main_menu_keyboard()
+            )
+            
+            # پاک کردن flag
+            context.user_data.pop('waiting_for_custom_time', None)
+        else:
+            await update.message.reply_text(
+                "❌ تنظیمات پیدا نشد!",
+                reply_markup=get_main_menu_keyboard()
+            )
+    finally:
+        db.close()
 
 
 async def change_dest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -210,9 +276,16 @@ async def send_random_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def get_settings_handlers():
-    """لیست handlers تنظیمات"""
+    """لیست handlers تنظیمات - FIXED"""
     return [
+        # Callback handlers
         CallbackQueryHandler(menu_callback_handler, pattern=r'^menu_'),
         CallbackQueryHandler(change_time_handler, pattern=r'^time_'),
         CallbackQueryHandler(change_dest_handler, pattern=r'^dest_'),
+        
+        # ✅ Message handler برای زمان سفارشی
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            custom_time_input_handler
+        ),
     ]
