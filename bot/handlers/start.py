@@ -1,5 +1,5 @@
 """
-Handler برای دستور /start و فرآیند Setup اولیه
+Handler برای دستور /start و فرآیند Setup اولیه - FIXED
 """
 import re
 from telegram import Update
@@ -60,12 +60,16 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     if data.startswith("time_"):
         if data == "time_custom":
+            # ✅ FIX: اینجا فقط درخواست زمان کن، چیزی ذخیره نکن
             await query.edit_message_text(
-                text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست (مثل 09:30):"
+                text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست\n\n"
+                     "مثال: 09:30, 14:00, 21:45",
+                reply_markup=get_back_to_menu_button()
             )
             return SETTING_TIME
         
-        send_time = data.split("_")[1]
+        # برای زمان‌های از پیش تعیین شده
+        send_time = data.split("_")[1]  # مثلاً "09:00"
         user_id = update.effective_user.id
         
         db = SessionLocal()
@@ -92,13 +96,19 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت زمان سفارشی"""
+    """مدیریت زمان سفارشی - FIXED"""
     from utils.helpers import validate_time_format
     
     time_str = update.message.text.strip()
     
+    # ✅ اعتبارسنجی فرمت
     if not validate_time_format(time_str):
-        await update.message.reply_text("❌ فرمت اشتباه! HH:MM وارد کن (مثل 09:30)")
+        await update.message.reply_text(
+            "❌ فرمت زمان اشتباه است!\n\n"
+            "لطفاً به فرمت HH:MM وارد کنید (مثل 09:30)\n"
+            "ساعت باید بین 00 تا 23 و دقیقه بین 00 تا 59 باشد.",
+            reply_markup=get_back_to_menu_button()
+        )
         return SETTING_TIME
     
     user_id = update.effective_user.id
@@ -107,6 +117,7 @@ async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if settings:
+            # ✅ ذخیره زمان واقعی (مثل "14:30")
             settings.send_time = time_str
             db.commit()
             
@@ -167,7 +178,7 @@ async def destination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                      "• @my_music_channel\n"
                      "• -1001234567890\n\n"
                      "⚠️ مهم: من باید **ادمین** کانال باشم!",
-                reply_markup=None
+                reply_markup=get_back_to_menu_button()
             )
             return SETTING_CHANNEL
     finally:
@@ -276,12 +287,20 @@ def get_start_conversation_handler():
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, 
                     channel_id_handler
+                ),
+                CallbackQueryHandler(
+                    lambda u, c: show_genre_selection(u, c),
+                    pattern=r'^menu_back$'
                 )
             ],
         },
         fallbacks=[
             CommandHandler('start', start_command),
             CommandHandler('cancel', cancel_handler),
+            CallbackQueryHandler(
+                lambda u, c: ConversationHandler.END,
+                pattern=r'^menu_back$'
+            )
         ],
         per_user=True,
         per_chat=False,
