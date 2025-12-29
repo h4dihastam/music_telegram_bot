@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ربات موزیک تلگرام - با auto-restart و error handling بهتر
+ربات موزیک تلگرام - Fixed event loop handling
 """
 import logging
 import sys
@@ -161,109 +161,88 @@ def create_application():
         .build()
 
 
-async def run_bot():
-    """اجرای ربات با retry"""
-    max_retries = 3
-    retry_count = 0
+async def main_async():
+    """Main async function - اجرای ربات"""
+    logger.info("="*60)
+    logger.info("🚀 شروع راه‌اندازی ربات موزیک...")
+    logger.info("="*60)
     
-    while retry_count < max_retries:
-        try:
-            logger.info("="*60)
-            logger.info("🚀 شروع راه‌اندازی ربات موزیک...")
-            logger.info("="*60)
-            
-            logger.info("⚙️ بررسی تنظیمات...")
-            config.validate()
-            
-            if not config.BOT_TOKEN:
-                logger.error("❌ BOT_TOKEN موجود نیست!")
-                sys.exit(1)
-            
-            logger.info("✅ تنظیمات OK")
-            
-            logger.info("🗄️ راه‌اندازی دیتابیس...")
-            init_db()
-            logger.info("✅ دیتابیس OK")
-            
-            logger.info("🤖 ساخت Application...")
-            app = create_application()
-            
-            logger.info("📝 ثبت handlers...")
-            
-            start_handler = get_start_conversation_handler()
-            app.add_handler(start_handler)
-            logger.info("  ✓ Start handler")
-            
-            app.add_handler(CommandHandler('menu', menu_command))
-            app.add_handler(CommandHandler('help', help_command))
-            app.add_handler(CommandHandler('status', status_command))
-            logger.info("  ✓ Command handlers")
-            
-            for handler in get_settings_handlers():
-                app.add_handler(handler)
-            logger.info("  ✓ Settings handlers")
-            
-            app.add_error_handler(error_handler)
-            logger.info("  ✓ Error handler")
-            
-            logger.info("⏰ راه‌اندازی Scheduler...")
-            scheduler = setup_scheduler(app.job_queue)
-            app.bot_data['scheduler'] = scheduler
-            logger.info("✅ Scheduler OK")
-            
-            app.post_init = post_init
-            
-            logger.info("="*60)
-            logger.info("✅ تمام تنظیمات کامل شد!")
-            logger.info("="*60)
-            
-            # اجرای bot
-            await app.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True
-            )
-            
-            # اگه به اینجا رسید، یعنی عادی بسته شد
-            break
-            
-        except (TimedOut, NetworkError) as e:
-            retry_count += 1
-            logger.warning(f"⚠️ Network error (تلاش {retry_count}/{max_retries}): {e}")
-            if retry_count < max_retries:
-                wait_time = retry_count * 5
-                logger.info(f"⏳ صبر {wait_time} ثانیه قبل از تلاش دوباره...")
-                await asyncio.sleep(wait_time)
-            else:
-                logger.error("❌ همه تلاش‌ها ناموفق بود")
-                sys.exit(1)
-                
-        except KeyboardInterrupt:
-            logger.info("\n⛔ ربات متوقف شد (KeyboardInterrupt)")
-            break
-            
-        except Exception as e:
-            logger.error(f"❌ خطای کلی: {e}", exc_info=True)
-            retry_count += 1
-            if retry_count < max_retries:
-                logger.info(f"🔄 تلاش مجدد {retry_count}/{max_retries}...")
-                await asyncio.sleep(5)
-            else:
-                sys.exit(1)
+    logger.info("⚙️ بررسی تنظیمات...")
+    config.validate()
+    
+    if not config.BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN موجود نیست!")
+        sys.exit(1)
+    
+    logger.info("✅ تنظیمات OK")
+    
+    logger.info("🗄️ راه‌اندازی دیتابیس...")
+    init_db()
+    logger.info("✅ دیتابیس OK")
+    
+    # شروع health server
+    await start_health_server()
+    
+    logger.info("🤖 ساخت Application...")
+    app = create_application()
+    
+    logger.info("📝 ثبت handlers...")
+    
+    start_handler = get_start_conversation_handler()
+    app.add_handler(start_handler)
+    logger.info("  ✓ Start handler")
+    
+    app.add_handler(CommandHandler('menu', menu_command))
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler('status', status_command))
+    logger.info("  ✓ Command handlers")
+    
+    for handler in get_settings_handlers():
+        app.add_handler(handler)
+    logger.info("  ✓ Settings handlers")
+    
+    app.add_error_handler(error_handler)
+    logger.info("  ✓ Error handler")
+    
+    logger.info("⏰ راه‌اندازی Scheduler...")
+    scheduler = setup_scheduler(app.job_queue)
+    app.bot_data['scheduler'] = scheduler
+    logger.info("✅ Scheduler OK")
+    
+    app.post_init = post_init
+    
+    logger.info("="*60)
+    logger.info("✅ تمام تنظیمات کامل شد!")
+    logger.info("="*60)
+    
+    # اجرای bot با initialize و shutdown صریح
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+    
+    logger.info("🤖 Bot is running. Press Ctrl+C to stop.")
+    
+    # منتظر بمون تا متوقف شه
+    try:
+        # به جای run_polling از این استفاده کن
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("\n⛔ دریافت سیگنال توقف...")
+    finally:
+        logger.info("🛑 Shutting down...")
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
 
 
 def main():
     """نقطه ورود اصلی"""
     try:
-        # ساخت event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # شروع health server
-        loop.run_until_complete(start_health_server())
-        
-        # اجرای ربات
-        loop.run_until_complete(run_bot())
-        
+        # ✅ FIX: استفاده از asyncio.run به جای دستی ساختن loop
+        asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("\n⛔ ربات متوقف شد")
     except Exception as e:
