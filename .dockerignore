@@ -1,3 +1,4 @@
+# Python
 __pycache__
 *.pyc
 *.pyo
@@ -8,14 +9,47 @@ __pycache__
 *.egg-info
 dist
 build
+
+# Virtual Environment
 .env
 .venv
 venv/
 ENV/
+env/
+
+# Git
 .git
 .gitignore
-README.md
-*.db
-downloads/
+.gitattributes
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+README.md
+TROUBLESHOOTING.md
+*.md
+
+# Database (فقط local)
+*.db
+*.sqlite
+*.sqlite3
+
+# Downloaded files (از image کنار گذاشته شه)
+downloads/
+temp/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+test_*.py
+*_test.py
