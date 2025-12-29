@@ -38,7 +38,7 @@ services:
       - key: PORT
         value: "8080"
     
-    # Persistent Disk - مهم!
+    # Persistent Disk
     disk:
       name: bot-persistent-data
       mountPath: /app/data
@@ -47,10 +47,8 @@ services:
     # Health Check
     healthCheckPath: /health
     
+    # Auto-restart on failure
     autoDeploy: true
-
-# توضیحات:
-# 1. type: web (نه worker) برای health check
-# 2. disk با mountPath /app/data برای ماندگاری دیتا
-# 3. healthCheckPath برای چک کردن وضعیت ربات
-# 4. DATABASE_URL به /app/data اشاره داره که روی disk نگه‌داری میشه
+    
+    # Restart policy (Render auto-restarts web services)
+    # Free plan: auto-restart with exponential backoff
