@@ -41,5 +41,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import sys; sys.exit(0)" || exit 1
 
+# کپی startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
 # اجرا
-CMD ["python", "-u", "main.py"]
+CMD ["./start.sh"]
