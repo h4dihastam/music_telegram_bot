@@ -1,11 +1,11 @@
 """
-مدیریت دیتابیس با SQLAlchemy - پشتیبانی PostgreSQL + SQLite
+مدیریت دیتابیس - نسخه حرفه‌ای با قابلیت‌های جدید
 """
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean, 
-    DateTime, ForeignKey, Text
+    DateTime, ForeignKey, Text, Float
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -14,53 +14,45 @@ import os
 from pathlib import Path
 from core.config import config
 
-# Base برای تمام مدل‌ها
 Base = declarative_base()
 
 
 def get_database_url():
-    """تعیین URL دیتابیس بر اساس محیط"""
+    """تعیین URL دیتابیس"""
     db_url = config.DATABASE_URL
     
-    # اگر SQLite باشه، مطمئن شو که path درست است
     if db_url.startswith('sqlite'):
-        # برای Docker/Render از /app/data استفاده کن
         if os.path.exists('/app'):
             data_dir = Path('/app/data')
             data_dir.mkdir(exist_ok=True, parents=True)
             db_url = f'sqlite:///{data_dir}/music_bot.db'
         else:
-            # برای local
             db_url = 'sqlite:///music_bot.db'
     
     return db_url
 
 
-# ساخت Engine
 DATABASE_URL = get_database_url()
 
-# تنظیمات مخصوص SQLite
 if DATABASE_URL.startswith('sqlite'):
     engine = create_engine(
         DATABASE_URL,
         echo=False,
         connect_args={
             'check_same_thread': False,
-            'timeout': 30  # افزایش timeout
+            'timeout': 30
         },
-        poolclass=StaticPool  # مهم برای SQLite در Docker
+        poolclass=StaticPool
     )
 else:
-    # PostgreSQL
     engine = create_engine(
         DATABASE_URL,
         echo=False,
-        pool_pre_ping=True,  # چک کردن connection قبل از استفاده
+        pool_pre_ping=True,
         pool_size=10,
         max_overflow=20
     )
 
-# Session factory
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
@@ -79,6 +71,8 @@ class User(Base):
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
     genres = relationship("UserGenre", back_populates="user", cascade="all, delete-orphan")
     sent_tracks = relationship("SentTrack", back_populates="user", cascade="all, delete-orphan")
+    liked_tracks = relationship("LikedTrack", back_populates="user", cascade="all, delete-orphan")
+    downloaded_tracks = relationship("DownloadedTrack", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSettings(Base):
@@ -89,6 +83,12 @@ class UserSettings(Base):
     send_to = Column(String(10), default='private')
     channel_id = Column(String(50), nullable=True)
     timezone = Column(String(50), default='Asia/Tehran')
+    
+    # قابلیت‌های جدید
+    auto_send_enabled = Column(Boolean, default=True)  # فعال/غیرفعال کردن ارسال خودکار
+    download_quality = Column(String(10), default='high')  # high, medium, low
+    show_lyrics = Column(Boolean, default=True)  # نمایش متن آهنگ
+    
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     user = relationship("User", back_populates="settings")
@@ -97,14 +97,13 @@ class UserSettings(Base):
 class UserGenre(Base):
     __tablename__ = 'user_genres'
     
-    id = Column(Integer, primary_key=True, autoincrement=True)  # اضافه کردن ID
+    id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'))
     genre = Column(String(50), nullable=False)
     added_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="genres")
     
-    # Index برای بهبود performance
     __table_args__ = (
         {'sqlite_autoincrement': True}
     ,)
@@ -121,6 +120,38 @@ class SentTrack(Base):
     sent_at = Column(DateTime, default=datetime.utcnow)
     
     user = relationship("User", back_populates="sent_tracks")
+
+
+class LikedTrack(Base):
+    """آهنگ‌های لایک شده - قابلیت جدید"""
+    __tablename__ = 'liked_tracks'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'))
+    track_id = Column(String(100), nullable=False)
+    track_name = Column(String(200))
+    artist = Column(String(200))
+    spotify_url = Column(String(500), nullable=True)
+    preview_url = Column(String(500), nullable=True)
+    liked_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="liked_tracks")
+
+
+class DownloadedTrack(Base):
+    """تاریخچه دانلودها - قابلیت جدید"""
+    __tablename__ = 'downloaded_tracks'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.user_id', ondelete='CASCADE'))
+    track_id = Column(String(100), nullable=False)
+    track_name = Column(String(200))
+    artist = Column(String(200))
+    source = Column(String(50))  # spotify, youtube, soundcloud, instagram
+    download_method = Column(String(50))  # search, link, voice
+    downloaded_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="downloaded_tracks")
 
 
 class LyricsCache(Base):
@@ -167,7 +198,6 @@ def get_or_create_user(
             db.refresh(user)
             print(f"✅ کاربر جدید ساخته شد: {user_id}")
         else:
-            # به‌روزرسانی اطلاعات
             updated = False
             if username and user.username != username:
                 user.username = username
@@ -184,40 +214,6 @@ def get_or_create_user(
     except Exception as e:
         db.rollback()
         print(f"❌ خطا در get_or_create_user: {e}")
-        raise
-    finally:
-        db.close()
-
-
-def get_user_genres(user_id: int) -> list:
-    """دریافت ژانرهای کاربر"""
-    db = SessionLocal()
-    try:
-        genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
-        return [g.genre for g in genres]
-    except Exception as e:
-        print(f"❌ خطا در get_user_genres: {e}")
-        return []
-    finally:
-        db.close()
-
-
-def save_user_genres(user_id: int, genres: list):
-    """ذخیره چندین ژانر"""
-    db = SessionLocal()
-    try:
-        # حذف ژانرهای قبلی
-        db.query(UserGenre).filter(UserGenre.user_id == user_id).delete()
-        
-        # اضافه کردن ژانرهای جدید
-        for genre in genres:
-            db.add(UserGenre(user_id=user_id, genre=genre))
-        
-        db.commit()
-        print(f"✅ {len(genres)} ژانر برای کاربر {user_id} ذخیره شد")
-    except Exception as e:
-        db.rollback()
-        print(f"❌ خطا در save_user_genres: {e}")
         raise
     finally:
         db.close()
