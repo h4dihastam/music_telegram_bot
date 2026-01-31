@@ -1,5 +1,5 @@
 """
-Handler برای دستور /start و فرآیند Setup اولیه - FIXED
+Handler /start - نسخه مدرن با UX حرفه‌ای
 """
 import re
 from telegram import Update
@@ -14,8 +14,8 @@ from telegram.ext import (
 from telegram.error import TelegramError, BadRequest, Forbidden
 
 from core.database import get_or_create_user, SessionLocal, UserSettings
+from bot.keyboards.reply import get_main_menu_reply_keyboard
 from bot.keyboards.inline import (
-    get_main_menu_keyboard,
     get_time_selection_keyboard,
     get_destination_keyboard,
     get_back_to_menu_button
@@ -25,30 +25,79 @@ from bot.states import CHOOSING_GENRE, SETTING_TIME, CHOOSING_DESTINATION, SETTI
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دستور /start"""
+    """
+    دستور /start - پیام خوش‌آمدگویی زیبا
+    """
     user = update.effective_user
     
+    # ساخت/بروزرسانی کاربر
     get_or_create_user(
         user_id=user.id,
         username=user.username,
         first_name=user.first_name
     )
     
-    welcome_text = f"""
-🎵 سلام {user.first_name} عزیز! خوش اومدی! 👋
+    # چک کنیم که آیا تنظیمات اولیه انجام شده؟
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == user.id
+        ).first()
+        
+        has_setup = settings is not None
+    finally:
+        db.close()
+    
+    # پیام خوش‌آمدگویی با emoji های زیاد
+    if has_setup:
+        # کاربر قبلاً setup کرده
+        welcome_text = f"""
+🎵 <b>سلام {user.first_name} عزیز! خوش برگشتی!</b> 👋
 
-به ربات موزیک روزانه خوش اومدی 🎶
+ربات موزیک <b>RitmLine</b> آماده است! 🎶
 
-من هر روز برات یه آهنگ جدید میفرستم طبق سلیقه‌ت!
+<i>از منوی زیر می‌تونی استفاده کنی:</i>
 
-بیا شروع کنیم! اول ژانر مورد علاقه‌ات رو انتخاب کن 👇
-    """
+🔍 <b>جستجوی سریع</b> - هر آهنگی که بخوای!
+🎲 <b>پخش زنده</b> - موزیک تصادفی الان
+❤️ <b>لایک‌ها</b> - آهنگ‌های محبوبت
+📥 <b>دانلودها</b> - تاریخچه دانلودت
+
+✨ <i>بزن بریم!</i>
+        """
+    else:
+        # کاربر جدید
+        welcome_text = f"""
+🎵 <b>سلام {user.first_name} عزیز! به ربات RitmLine خوش اومدی!</b> 🎉
+
+من هر روز برات یه آهنگ جدید میفرستم 🎶
+
+<b>✨ قابلیت‌های من:</b>
+
+🔍 جستجوی هوشمند موزیک
+🎤 تشخیص آهنگ از ویس
+📱 دانلود از لینک اینستاگرام
+❤️ لایک و ذخیره آهنگ
+📜 نمایش متن آهنگ
+⏰ ارسال خودکار روزانه
+🇮🇷 آهنگ‌های ایرانی کامل
+
+<i>بیا شروع کنیم! اول ژانر مورد علاقه‌ات رو انتخاب کن 👇</i>
+        """
     
     if update.message:
-        await update.message.reply_text(welcome_text)
+        await update.message.reply_text(
+            welcome_text,
+            parse_mode='HTML',
+            reply_markup=get_main_menu_reply_keyboard() if has_setup else None
+        )
     
-    await show_genre_selection(update, context, edit=False)
-    return CHOOSING_GENRE
+    if not has_setup:
+        # نمایش انتخاب ژانر برای کاربران جدید
+        await show_genre_selection(update, context, edit=False)
+        return CHOOSING_GENRE
+    
+    return ConversationHandler.END
 
 
 async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,7 +109,6 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     if data.startswith("time_"):
         if data == "time_custom":
-            # ✅ FIX: اینجا فقط درخواست زمان کن، چیزی ذخیره نکن
             await query.edit_message_text(
                 text="⏰ زمان دلخواه رو به فرمت HH:MM بفرست\n\n"
                      "مثال: 09:30, 14:00, 21:45",
@@ -68,8 +116,7 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
             )
             return SETTING_TIME
         
-        # برای زمان‌های از پیش تعیین شده
-        send_time = data.split("_")[1]  # مثلاً "09:00"
+        send_time = data.split("_")[1]
         user_id = update.effective_user.id
         
         db = SessionLocal()
@@ -79,7 +126,6 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
                 settings.send_time = send_time
                 db.commit()
                 
-                # تنظیم scheduler
                 scheduler = context.bot_data.get('scheduler')
                 if scheduler:
                     from core.scheduler import schedule_user_daily_music_helper
@@ -96,17 +142,15 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت زمان سفارشی - FIXED"""
+    """مدیریت زمان سفارشی"""
     from utils.helpers import validate_time_format
     
     time_str = update.message.text.strip()
     
-    # ✅ اعتبارسنجی فرمت
     if not validate_time_format(time_str):
         await update.message.reply_text(
             "❌ فرمت زمان اشتباه است!\n\n"
-            "لطفاً به فرمت HH:MM وارد کنید (مثل 09:30)\n"
-            "ساعت باید بین 00 تا 23 و دقیقه بین 00 تا 59 باشد.",
+            "لطفاً به فرمت HH:MM وارد کنید (مثل 09:30)",
             reply_markup=get_back_to_menu_button()
         )
         return SETTING_TIME
@@ -117,11 +161,9 @@ async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if settings:
-            # ✅ ذخیره زمان واقعی (مثل "14:30")
             settings.send_time = time_str
             db.commit()
             
-            # تنظیم scheduler
             scheduler = context.bot_data.get('scheduler')
             if scheduler:
                 from core.scheduler import schedule_user_daily_music_helper
@@ -157,18 +199,25 @@ async def destination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             settings.channel_id = None
             db.commit()
             
-            # تنظیم scheduler
             scheduler = context.bot_data.get('scheduler')
             if scheduler:
                 from core.scheduler import schedule_user_daily_music_helper
                 schedule_user_daily_music_helper(user_id, scheduler)
             
             await query.edit_message_text(
-                text="✅ تنظیمات با موفقیت ذخیره شد!\n\n"
-                     "🎵 هر روز یه آهنگ جدید میگیری!\n\n"
-                     "از /menu می‌تونی تنظیمات رو تغییر بدی 👇",
-                reply_markup=get_main_menu_keyboard()
+                text="✅ <b>تمام! همه چیز آماده است!</b> 🎉\n\n"
+                     "🎵 از امروز هر روز یه آهنگ جدید دریافت می‌کنی!\n\n"
+                     "<i>از منوی پایین می‌تونی استفاده کنی:</i>",
+                parse_mode='HTML'
             )
+            
+            # ارسال منوی اصلی
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🎵 منوی اصلی:",
+                reply_markup=get_main_menu_reply_keyboard()
+            )
+            
             return ConversationHandler.END
         
         elif data == "dest_channel":
@@ -197,7 +246,6 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             chat_id = int(channel_input)
 
         chat = await context.bot.get_chat(chat_id)
-
         admins = await context.bot.get_chat_administrators(chat_id)
         bot_is_admin = any(admin.user.id == context.bot.id for admin in admins)
 
@@ -219,7 +267,6 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 settings.channel_id = str(chat_id)
                 db.commit()
                 
-                # تنظیم scheduler
                 scheduler = context.bot_data.get('scheduler')
                 if scheduler:
                     from core.scheduler import schedule_user_daily_music_helper
@@ -228,10 +275,11 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             db.close()
 
         await update.message.reply_text(
-            f"✅ عالی! کانال تنظیم شد:\n\n"
-            f"📢 {chat.title if hasattr(chat, 'title') else display_id}\n\n"
-            f"تنظیمات کامل شد. /menu برای منو.",
-            reply_markup=get_main_menu_keyboard()
+            f"✅ <b>عالی! همه چیز آماده!</b> 🎉\n\n"
+            f"📢 کانال: {chat.title if hasattr(chat, 'title') else display_id}\n\n"
+            f"از امروز هر روز موزیک تو کانال میاد!",
+            parse_mode='HTML',
+            reply_markup=get_main_menu_reply_keyboard()
         )
 
         return ConversationHandler.END
@@ -248,8 +296,8 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """لغو conversation"""
     await update.message.reply_text(
-        "❌ لغو شد! برای شروع دوباره /start بزن.",
-        reply_markup=get_main_menu_keyboard()
+        "❌ لغو شد!",
+        reply_markup=get_main_menu_reply_keyboard()
     )
     return ConversationHandler.END
 

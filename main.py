@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ربات موزیک تلگرام - Fixed event loop handling
+ربات موزیک تلگرام - با قابلیت جستجو و موزیک فارسی
+نسخه 2.0
 """
 import logging
 import sys
@@ -15,6 +16,7 @@ from core.config import config
 from core.database import init_db
 from core.scheduler import setup_scheduler
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
+from bot.handlers.search import get_search_conversation_handler  # ✅ اضافه شد
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -85,20 +87,25 @@ async def help_command(update: Update, context):
 📋 <b>دستورات:</b>
 /start - شروع و تنظیمات
 /menu - منوی اصلی
+/search - جستجوی موزیک 🔍
 /status - وضعیت فعلی
 /help - این راهنما
 
 🎯 <b>قابلیت‌ها:</b>
-✅ انتخاب ژانر موسیقی
+✅ انتخاب ژانر موسیقی (فارسی و خارجی)
 ✅ ارسال خودکار روزانه
 ✅ ارسال به پیوی یا کانال
 ✅ دریافت متن آهنگ
-✅ دانلود MP3
+✅ دانلود MP3 کامل
+✅ جستجوی دستی موزیک
+✅ موزیک فارسی (پاپ، سنتی، رپ)
 
 💡 <b>نکات:</b>
 - هر روز در زمان انتخابی موزیک میگیری
 - می‌تونی چند ژانر انتخاب کنی
 - برای کانال، ربات باید ادمین باشه
+- با /search می‌تونی هر آهنگی رو جستجو کنی
+- موزیک فارسی کامل پشتیبانی میشه! 🇮🇷
     """
     await update.message.reply_text(
         help_text,
@@ -129,7 +136,8 @@ async def status_command(update: Update, context):
             f"⏰ زمان ارسال: {settings.send_time}\n"
             f"🎵 ژانرها: {genre_list}\n"
             f"📍 مقصد: {settings.send_to}\n"
-            f"🌍 منطقه زمانی: {settings.timezone}"
+            f"🌍 منطقه زمانی: {settings.timezone}\n"
+            f"🔄 ارسال خودکار: {'✅ فعال' if settings.auto_send_enabled else '❌ غیرفعال'}"
         )
         
         if settings.send_to == 'channel' and settings.channel_id:
@@ -188,15 +196,23 @@ async def main_async():
     
     logger.info("📝 ثبت handlers...")
     
+    # Start handler
     start_handler = get_start_conversation_handler()
     app.add_handler(start_handler)
     logger.info("  ✓ Start handler")
     
+    # ✅ Search handler - جدید! 🔍
+    search_handler = get_search_conversation_handler()
+    app.add_handler(search_handler)
+    logger.info("  ✓ Search handler")
+    
+    # Command handlers
     app.add_handler(CommandHandler('menu', menu_command))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('status', status_command))
     logger.info("  ✓ Command handlers")
     
+    # Settings handlers
     for handler in get_settings_handlers():
         app.add_handler(handler)
     logger.info("  ✓ Settings handlers")
@@ -213,9 +229,10 @@ async def main_async():
     
     logger.info("="*60)
     logger.info("✅ تمام تنظیمات کامل شد!")
+    logger.info("🎵 نسخه 2.0 - با موزیک فارسی و جستجو")
     logger.info("="*60)
     
-    # اجرای bot با initialize و shutdown صریح
+    # اجرای bot
     await app.initialize()
     await app.start()
     await app.updater.start_polling(
@@ -225,9 +242,7 @@ async def main_async():
     
     logger.info("🤖 Bot is running. Press Ctrl+C to stop.")
     
-    # منتظر بمون تا متوقف شه
     try:
-        # به جای run_polling از این استفاده کن
         await asyncio.Event().wait()
     except (KeyboardInterrupt, SystemExit):
         logger.info("\n⛔ دریافت سیگنال توقف...")
@@ -241,7 +256,6 @@ async def main_async():
 def main():
     """نقطه ورود اصلی"""
     try:
-        # ✅ FIX: استفاده از asyncio.run به جای دستی ساختن loop
         asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("\n⛔ ربات متوقف شد")

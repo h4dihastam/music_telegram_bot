@@ -1,43 +1,62 @@
-# 🎵 ربات موزیک تلگرام
+# 🎵 ربات موزیک تلگرام - RitmLine
 
-ربات تلگرام هوشمند برای ارسال خودکار موزیک روزانه بر اساس سلیقه کاربر
+ربات تلگرام هوشمند و حرفه‌ای برای موزیک با قابلیت‌های پیشرفته
 
-## ✨ ویژگی‌ها
+## ✨ قابلیت‌های اصلی
 
-- 🎵 **انتخاب چندگانه ژانر** - پاپ، راک، الکترونیک، **ایرانی** و 15+ ژانر دیگر
+### 🎯 جستجوی هوشمند
+- 🔍 **جستجوی سریع** - با نام آهنگ یا هنرمند
+- 🎤 **تشخیص از ویس** - فقط یه قسمت از آهنگ رو بفرست!
+- 🎬 **تشخیص از ویدیو** - آهنگ داخل کلیپ رو پیدا می‌کنه
+- 📱 **از لینک اینستاگرام** - آهنگ داخل پست رو تشخیص میده
+- 📝 **با متن آهنگ** - یه خط از آهنگ بنویس
+
+### 🎵 موزیک
 - ⏰ **ارسال خودکار روزانه** - در زمان دلخواه شما
-- 📍 **ارسال به پیوی یا کانال** - انعطاف کامل
-- 🎧 **دانلود از چند منبع** - SoundCloud (اولویت)، YouTube، Spotify
-- 📝 **نمایش متن آهنگ** - با API چندگانه
-- 🇮🇷 **پشتیبانی کامل فارسی** - موزیک ایرانی، ترکی، عربی
-- 💾 **دیتای پایدار** - اطلاعات شما ذخیره می‌مونه
+- 🎲 **پخش زنده** - موزیک تصادفی الان
+- ❤️ **لایک و ذخیره** - آهنگ‌های محبوب
+- 📥 **تاریخچه دانلود** - همه دانلودهات
+- 📜 **نمایش متن آهنگ** - lyrics با API چندگانه
 
-## 🚀 نصب سریع
+### 🌍 پشتیبانی کامل
+- 🇮🇷 **موزیک ایرانی کامل** - پاپ، سنتی، رپ فارسی
+- 🌐 **20+ ژانر جهانی** - از راک تا کلاسیک
+- 📍 **ارسال به کانال** - خصوصی یا عمومی
+- 💾 **دیتای پایدار** - اطلاعات ذخیره می‌مونه
 
-### 1. کلون پروژه
+---
+
+## 🚀 نصب و راه‌اندازی
+
+### پیش‌نیازها
+
+- Python 3.11+
+- FFmpeg
+- yt-dlp
+
+### 1️⃣ کلون پروژه
 
 ```bash
 git clone https://github.com/your-username/music-telegram-bot.git
 cd music-telegram-bot
 ```
 
-### 2. نصب Python Dependencies
+### 2️⃣ نصب Dependencies
 
 ```bash
 # ساخت محیط مجازی
 python -m venv venv
 
 # فعال‌سازی
-# Linux/Mac:
-source venv/bin/activate
-# Windows:
-venv\Scripts\activate
+source venv/bin/activate  # Linux/Mac
+# یا
+venv\Scripts\activate  # Windows
 
 # نصب
 pip install -r requirements.txt
 ```
 
-### 3. نصب FFmpeg (ضروری)
+### 3️⃣ نصب FFmpeg
 
 **Ubuntu/Debian:**
 ```bash
@@ -54,247 +73,272 @@ brew install ffmpeg
 - دانلود از [ffmpeg.org](https://ffmpeg.org/download.html)
 - اضافه کردن به PATH
 
-### 4. تنظیمات
+### 4️⃣ دریافت API Keys
+
+#### Telegram Bot Token
+1. پیام به [@BotFather](https://t.me/BotFather)
+2. `/newbot`
+3. نام ربات را وارد کنید
+4. توکن را کپی کنید
+
+#### Spotify API
+1. [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. "Create App"
+3. کپی `Client ID` و `Client Secret`
+
+#### ACRCloud API (برای تشخیص آهنگ)
+1. [console.acrcloud.com](https://console.acrcloud.com)
+2. ساخت حساب رایگان
+3. "Audio & Video Recognition"
+4. کپی `Access Key` و `Access Secret`
+
+### 5️⃣ تنظیم محیط
 
 ```bash
-# کپی فایل نمونه
 cp .env.example .env
-
-# ویرایش .env
-nano .env  # یا هر ادیتور دیگر
+nano .env
 ```
 
 **محتوای `.env`:**
 ```env
-BOT_TOKEN=123456:ABC-DEF...           # از @BotFather
-SPOTIFY_CLIENT_ID=your_id             # از developer.spotify.com
-SPOTIFY_CLIENT_SECRET=your_secret     # از developer.spotify.com
+# Telegram
+BOT_TOKEN=123456:ABC-DEF...
+
+# Spotify
+SPOTIFY_CLIENT_ID=your_id
+SPOTIFY_CLIENT_SECRET=your_secret
+
+# ACRCloud (برای تشخیص آهنگ)
+ACRCLOUD_ACCESS_KEY=your_key
+ACRCLOUD_ACCESS_SECRET=your_secret
+ACRCLOUD_HOST=identify-eu-west-1.acrcloud.com
+
+# Database
 DATABASE_URL=sqlite:///music_bot.db
+
+# تنظیمات
 DEFAULT_TIMEZONE=Asia/Tehran
 PORT=8080
 ```
 
-### 5. اجرا
+### 6️⃣ اجرا
 
 ```bash
 python main.py
 ```
 
-## 🔧 راهنمای دریافت API Keys
+---
 
-### Telegram Bot Token
+## 🌐 Deploy در Render
 
-1. پیام به [@BotFather](https://t.me/BotFather) در تلگرام
-2. دستور `/newbot`
-3. نام ربات را وارد کنید
-4. توکن را کپی کنید
-
-### Spotify API
-
-1. [developer.spotify.com](https://developer.spotify.com/dashboard) باز کنید
-2. "Create App" کلیک کنید
-3. نام و توضیحات را پر کنید
-4. `Client ID` و `Client Secret` را کپی کنید
-
-## 🌐 Deploy در Render (رایگان!)
-
-### گام 1: آماده‌سازی
+### 1️⃣ آماده‌سازی
 
 ```bash
-# مطمئن شو که همه فایل‌ها commit شدن
 git add .
 git commit -m "Ready for deployment"
 git push origin main
 ```
 
-### گام 2: ساخت Service در Render
+### 2️⃣ ساخت Service
 
-1. [render.com](https://render.com) باز کن
-2. **New** → **Web Service**
-3. Connect GitHub repository
-4. تنظیمات:
+1. [render.com](https://render.com) → **New** → **Web Service**
+2. Connect GitHub repository
+3. تنظیمات:
    - **Name**: music-telegram-bot
    - **Environment**: Docker
    - **Plan**: Free
 
-### گام 3: Environment Variables
-
-در بخش **Environment** این متغیرها رو اضافه کن:
+### 3️⃣ Environment Variables
 
 | Key | Value |
 |-----|-------|
-| `BOT_TOKEN` | توکن ربات از BotFather |
-| `SPOTIFY_CLIENT_ID` | کلاینت آیدی Spotify |
-| `SPOTIFY_CLIENT_SECRET` | سیکرت Spotify |
+| `BOT_TOKEN` | توکن از BotFather |
+| `SPOTIFY_CLIENT_ID` | کلاینت آیدی |
+| `SPOTIFY_CLIENT_SECRET` | سیکرت |
+| `ACRCLOUD_ACCESS_KEY` | کلید ACRCloud |
+| `ACRCLOUD_ACCESS_SECRET` | سیکرت ACRCloud |
 | `DATABASE_URL` | `sqlite:////app/data/music_bot.db` |
 | `PORT` | `8080` |
 
-### گام 4: Disk (مهم!)
+### 4️⃣ Persistent Disk
 
-در بخش **Disks**:
+**مهم!** برای ذخیره دیتا:
 - **Name**: bot-persistent-data
 - **Mount Path**: `/app/data`
 - **Size**: 1 GB
 
-> ⚠️ **نکته مهم**: بدون Disk، دیتای شما بعد از هر restart پاک میشه!
+### 5️⃣ Deploy
 
-### گام 5: Deploy
+کلیک **Create Web Service** و منتظر بمانید (5-10 دقیقه)
 
-کلیک **Create Web Service**. منتظر بمون تا build تموم شه (5-10 دقیقه).
+---
 
-## 📱 استفاده از ربات
+## 📱 استفاده
 
 ### دستورات اصلی
 
-- `/start` - شروع و تنظیمات اولیه
-- `/menu` - منوی اصلی
-- `/status` - نمایش وضعیت فعلی
-- `/help` - راهنما
-
-### راهنمای سریع
-
-1. **شروع**: `/start` بزنید
-2. **ژانر**: یک یا چند ژانر انتخاب کنید
-3. **زمان**: زمان ارسال روزانه رو تنظیم کنید
-4. **مقصد**: پیوی یا کانال؟
-   - اگه کانال: ربات رو ادمین کنید و آیدی کانال رو بدید
-5. **تمام!** هر روز موزیک دریافت می‌کنید 🎶
-
-### نمونه استفاده برای کانال
-
 ```
-1. ربات رو به کانال اضافه کنید
-2. ربات رو ادمین کنید (با دسترسی ارسال پیام)
-3. آیدی کانال رو پیدا کنید:
-   - اگه username داره: @my_channel
-   - اگه نداره: -1001234567890
-4. در ربات گزینه "کانال" رو بزنید
-5. آیدی رو بفرستید
+/start  - شروع و تنظیمات
+/search - جستجوی موزیک
+/menu   - منوی اصلی
+/status - وضعیت فعلی
+/help   - راهنما
 ```
+
+### قابلیت‌های منو
+
+#### 🔍 جستجوی سریع
+1. **لینک اینستاگرام** - آهنگ داخل پست
+2. **کلیپ حاوی آهنگ** - آپلود ویدیو
+3. **ویس از آهنگ** - یه تیکه بفرست
+4. **اسم آهنگ** - مستقیم بنویس
+
+#### 🎲 پخش زنده
+موزیک تصادفی بر اساس ژانرهای شما
+
+#### ❤️ لایک‌ها
+- آهنگ‌های لایک شده
+- دسترسی سریع
+
+#### 📥 دانلودها
+- تاریخچه کامل
+- ژانرهای من
+- تنظیمات زمان‌بندی
+
+---
 
 ## 🎵 ژانرهای موجود
 
-- 🎸 پاپ، راک، متال، ایندی
-- 🎤 هیپ‌هاپ، رپ، آر‌اند‌بی
-- 🎹 الکترونیک، دنس، EDM
-- 🎺 جاز، بلوز، کلاسیک
-- 🌍 **ایرانی، ترکی، عربی، لاتین**
-- 🇰🇷 کی‌پاپ
-- 🪕 فولک، کانتری، رگه
+### 🇮🇷 ایرانی
+- پاپ ایرانی
+- سنتی / اصیل
+- رپ فارسی
 
-## 🔍 نحوه دانلود موزیک
+### 🌍 جهانی
+- پاپ، راک، متال
+- هیپ‌هاپ، رپ
+- الکترونیک، EDM، دنس
+- جاز، بلوز، کلاسیک
+- کانتری، فولک، ایندی
+- لاتین، عربی، ترکی
+- کی‌پاپ
 
-ربات از **3 منبع** به ترتیب تلاش می‌کنه:
+---
 
-1. **SoundCloud** (اولویت اول) - کیفیت عالی، کامل
-2. **YouTube** - معمولاً موفق
-3. **Spotify Preview** (آخرین راه) - فقط 30 ثانیه
+## 🔧 عیب‌یابی
 
-## 🛠️ عیب‌یابی
-
-### مشکل: "آهنگ پیدا نشد"
-
-**راه‌حل:**
-- Spotify API credentials رو چک کنید
-- اینترنت سرور رو بررسی کنید
-- لاگ‌ها رو چک کنید: `tail -f bot.log`
-
-### مشکل: "دیتا پاک میشه"
+### مشکل: تشخیص آهنگ کار نمی‌کنه
 
 **راه‌حل:**
-- مطمئن شوید که در Render **Disk** تنظیم شده
-- چک کنید که `DATABASE_URL` به `/app/data/` اشاره می‌کنه
+1. چک کنید ACRCloud credentials درست باشه
+2. حساب ACRCloud فعال باشه
+3. FFmpeg نصب باشه: `ffmpeg -version`
 
-### مشکل: "زمان ارسال کار نمی‌کنه"
-
-**راه‌حل:**
-- فرمت زمان رو چک کنید (HH:MM مثل 09:30)
-- Timezone رو بررسی کنید
-- لاگ scheduler رو ببینید
-
-### مشکل: "دانلود نمی‌شه"
+### مشکل: دانلود فقط 30 ثانیه میاد
 
 **راه‌حل:**
-- FFmpeg نصب باشه: `ffmpeg -version`
-- yt-dlp آپدیت باشه: `pip install -U yt-dlp`
+1. `python test_download.py` بزنید
+2. چک کنید: yt-dlp و FFmpeg
+3. اینترنت سرور رو بررسی کنید
 
-## 📊 ساختار پروژه
+### مشکل: دیتا بعد از restart پاک میشه
+
+**راه‌حل:**
+- در Render **Disk** تنظیم کنید
+- `DATABASE_URL` به `/app/data/` اشاره کنه
+
+### لاگ‌ها
+
+```bash
+# Local
+tail -f bot.log
+
+# Render
+Dashboard → Your Service → Logs
+```
+
+---
+
+## 🏗️ ساختار پروژه
 
 ```
 music_telegram_bot/
 ├── bot/
-│   ├── handlers/          # هندلرهای تلگرام
-│   │   ├── start.py       # فرآیند Setup
-│   │   ├── settings.py    # منو و تنظیمات
-│   │   ├── genre.py       # انتخاب ژانر
-│   │   └── channel.py     # تنظیمات کانال
-│   ├── keyboards/         # کیبوردها
-│   └── states.py          # State های conversation
+│   ├── handlers/
+│   │   ├── start.py           # Setup اولیه
+│   │   ├── main_menu.py       # منوی اصلی
+│   │   ├── input_processor.py # پردازش ورودی
+│   │   ├── search.py          # جستجو
+│   │   └── ...
+│   ├── keyboards/
+│   │   ├── reply.py          # کیبوردهای Reply
+│   │   └── inline.py         # کیبوردهای Inline
+│   └── states.py             # States
 ├── core/
-│   ├── config.py          # تنظیمات
-│   ├── database.py        # مدل‌های دیتابیس
-│   └── scheduler.py       # زمان‌بندی
+│   ├── config.py             # تنظیمات
+│   ├── database.py           # مدل‌های DB
+│   └── scheduler.py          # زمان‌بندی
 ├── services/
-│   ├── spotify.py         # سرویس Spotify
-│   ├── musixmatch.py      # متن آهنگ
-│   ├── downloader.py      # دانلود موزیک
-│   └── music_sender.py    # ارسال موزیک
-├── data/
-│   └── genres.json        # لیست ژانرها
+│   ├── spotify.py            # Spotify API
+│   ├── music_recognition.py  # تشخیص آهنگ
+│   ├── downloader.py         # دانلود
+│   ├── musixmatch.py         # متن آهنگ
+│   └── music_sender.py       # ارسال
 ├── utils/
-│   ├── helpers.py         # توابع کمکی
-│   └── decorators.py      # دکوراتورها
-├── main.py                # نقطه ورود
-├── Dockerfile             # برای Docker
-├── render.yaml            # تنظیمات Render
-└── requirements.txt       # Dependencies
+│   ├── helpers.py            # توابع کمکی
+│   └── decorators.py         # دکوراتورها
+├── data/
+│   └── genres.json           # لیست ژانرها
+├── main.py                   # نقطه ورود
+├── Dockerfile
+├── requirements.txt
+└── render.yaml
 ```
 
-## 🔒 امنیت
-
-- **هیچ‌وقت** `.env` رو commit نکنید
-- توکن‌ها رو فقط در Environment Variables ذخیره کنید
-- در production از PostgreSQL استفاده کنید
-
-## 🐛 گزارش مشکل
-
-اگه مشکلی پیدا کردید:
-
-1. لاگ‌ها رو چک کنید: `bot.log`
-2. Issue باز کنید در GitHub
-3. اطلاعات لازم رو بدید:
-   - توضیح مشکل
-   - لاگ‌های خطا
-   - نسخه Python
-   - محیط (Local/Render/Docker)
+---
 
 ## 🤝 مشارکت
 
-Pull Request ها خوش‌آمدید! برای تغییرات بزرگ، اول Issue باز کنید.
+Pull Request ها خوش‌آمدید! 
+
+1. Fork کنید
+2. Branch بسازید: `git checkout -b feature/amazing`
+3. Commit کنید: `git commit -m 'Add amazing feature'`
+4. Push کنید: `git push origin feature/amazing`
+5. Pull Request باز کنید
+
+---
 
 ## 📝 لایسنس
 
 MIT License - استفاده آزاد
 
+---
+
 ## ⚠️ تذکر قانونی
 
-این پروژه برای اهداف آموزشی است. لطفاً:
-- قوانین کپی‌رایت موزیک را رعایت کنید
-- از موزیک دانلود شده فقط برای استفاده شخصی استفاده کنید
+این ربات برای اهداف آموزشی است. لطفاً:
+- قوانین کپی‌رایت را رعایت کنید
+- از موزیک فقط برای استفاده شخصی استفاده کنید
 - موزیک را بدون مجوز توزیع نکنید
+
+---
 
 ## 💬 پشتیبانی
 
-- 📧 ایمیل: your-email@example.com
+- 📧 ایمیل: support@example.com
 - 💬 تلگرام: @your_username
 - 🐛 Issues: [GitHub Issues](https://github.com/your-username/music-telegram-bot/issues)
 
-## 🎉 تشکر
+---
+
+## 🙏 تشکر
 
 از این پروژه‌ها الهام گرفته شده:
 - python-telegram-bot
 - spotipy
 - yt-dlp
+- ACRCloud
 
 ---
 
