@@ -1,5 +1,9 @@
 """
+<<<<<<< HEAD
 Spotify Service - بهبود یافته برای آهنگ‌های فارسی + جلوگیری از تکرار
+=======
+Spotify Service - با جستجوی بهبود یافته + ژانرهای جدید
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
 """
 import random
 import logging
@@ -14,6 +18,7 @@ logger = logging.getLogger(__name__)
 class SpotifyService:
     """کلاس اصلی برای کار با Spotify API"""
     
+<<<<<<< HEAD
     # هنرمندان فارسی محبوب - گسترش یافته
     PERSIAN_ARTISTS = {
         'persian_pop': [
@@ -59,6 +64,10 @@ class SpotifyService:
         ],
         
         # جهانی
+=======
+    # نقشه ژانرها به کلمات کلیدی جستجو - بهبود یافته
+    GENRE_KEYWORDS = {
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
         'pop': ['pop', 'pop music', 'popular'],
         'rock': ['rock', 'rock music', 'alternative rock'],
         'hiphop': ['hip hop', 'rap', 'hip-hop', 'rapper'],
@@ -69,11 +78,35 @@ class SpotifyService:
         'country': ['country', 'country music', 'nashville'],
         'rnb': ['r&b', 'rnb', 'soul'],
         'reggae': ['reggae', 'ska', 'dancehall'],
+<<<<<<< HEAD
         'latin': ['latin', 'reggaeton', 'salsa'],
         'kpop': ['kpop', 'korean pop', 'k-pop'],
         'indie': ['indie', 'independent'],
         'blues': ['blues'],
         'folk': ['folk', 'acoustic'],
+=======
+        'latin': ['latin', 'reggaeton', 'salsa', 'bachata'],
+        'kpop': ['kpop', 'korean pop', 'k-pop', 'korean music'],
+        'indie': ['indie', 'independent', 'indie rock', 'indie pop'],
+        'blues': ['blues', 'blues music', 'rhythm and blues'],
+        'folk': ['folk', 'folk music', 'acoustic'],
+        # ژانرهای جدید
+        'persian': ['persian music', 'iranian music', 'farsi', 'persian pop'],
+        'arabic': ['arabic music', 'arab', 'middle eastern'],
+        'turkish': ['turkish music', 'turkish pop', 'türkçe']
+    }
+    
+    # پلی‌لیست‌های محبوب برای هر ژانر
+    POPULAR_PLAYLISTS = {
+        'pop': ['Today\'s Top Hits', 'Pop Rising', 'Pop Mix'],
+        'rock': ['Rock Classics', 'Rock Mix', 'Alternative Rock'],
+        'hiphop': ['RapCaviar', 'Hip Hop Mix', 'Most Necessary'],
+        'electronic': ['mint', 'Dance Rising', 'Electronic Mix'],
+        'kpop': ['K-Pop ON!', 'K-Pop Daebak', 'K-Pop Rising'],
+        'persian': ['Persian Pop', 'Iranian Music', 'Farsi Hits'],
+        'arabic': ['Arabic Pop', 'Top Arabic', 'Arabic Hits'],
+        'turkish': ['Turkish Pop', 'Türkçe Pop', 'Turkish Hits']
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
     }
     
     def __init__(self):
@@ -104,7 +137,11 @@ class SpotifyService:
         limit: int = 100,
         market: str = ''
     ) -> List[Dict[str, Any]]:
+<<<<<<< HEAD
         """جستجوی آهنگ با تعداد بیشتر"""
+=======
+        """جستجوی آهنگ بر اساس ژانر - روش بهبود یافته با fallback"""
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
         if not self.is_available():
             logger.error("❌ Spotify Service در دسترس نیست")
             return []
@@ -112,12 +149,42 @@ class SpotifyService:
         all_tracks = []
         
         try:
+<<<<<<< HEAD
             # استراتژی ویژه برای ژانرهای فارسی
             if genre.startswith('persian_'):
                 all_tracks = self._search_persian_tracks(genre, limit)
             else:
                 # جستجوی عادی
                 all_tracks = self._search_global_tracks(genre, limit, market)
+=======
+            # روش 1: جستجو با چند keyword
+            keywords = self.GENRE_KEYWORDS.get(genre, [genre])
+            
+            for keyword in keywords[:3]:  # سه کلمه اول
+                try:
+                    results = self.sp.search(
+                        q=keyword,
+                        type='track',
+                        limit=20,
+                        market=market
+                    )
+                    
+                    if results['tracks']['items']:
+                        all_tracks.extend(results['tracks']['items'])
+                        
+                    if len(all_tracks) >= limit:
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ خطا در جستجو با '{keyword}': {e}")
+                    continue
+            
+            # روش 2: جستجو در پلی‌لیست‌های محبوب
+            if len(all_tracks) < 20:
+                logger.info(f"⚠️ نتیجه کم ({len(all_tracks)}), جستجو در playlist‌ها...")
+                playlist_tracks = self._search_from_playlists(genre, limit - len(all_tracks))
+                all_tracks.extend(playlist_tracks)
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
             
             # حذف تکراری بر اساس track ID
             seen_ids = set()
@@ -134,6 +201,7 @@ class SpotifyService:
             logger.error(f"❌ خطا در جستجو: {e}")
             return []
     
+<<<<<<< HEAD
     def _search_persian_tracks(self, genre: str, limit: int) -> List[Dict[str, Any]]:
         """جستجوی گسترده برای آهنگ‌های فارسی"""
         all_tracks = []
@@ -219,17 +287,122 @@ class SpotifyService:
         
         return all_tracks
     
+=======
+    def _search_from_playlists(self, genre: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """جستجو در playlist‌های محبوب ژانر"""
+        all_tracks = []
+        
+        try:
+            # اول از لیست playlist‌های از پیش تعریف شده استفاده کن
+            playlist_names = self.POPULAR_PLAYLISTS.get(genre, [])
+            
+            for playlist_name in playlist_names:
+                try:
+                    # جستجوی playlist
+                    results = self.sp.search(
+                        q=playlist_name,
+                        type='playlist',
+                        limit=1
+                    )
+                    
+                    if not results['playlists']['items']:
+                        continue
+                    
+                    playlist = results['playlists']['items'][0]
+                    
+                    # دریافت آهنگ‌های playlist
+                    tracks_results = self.sp.playlist_tracks(
+                        playlist['id'],
+                        limit=30
+                    )
+                    
+                    for item in tracks_results['items']:
+                        if item and item.get('track') and item['track'].get('id'):
+                            all_tracks.append(item['track'])
+                            
+                        if len(all_tracks) >= limit:
+                            break
+                            
+                except Exception as e:
+                    logger.warning(f"⚠️ خطا در playlist '{playlist_name}': {e}")
+                    continue
+                
+                if len(all_tracks) >= limit:
+                    break
+            
+            # اگر هنوز کم داریم، جستجوی عمومی playlist
+            if len(all_tracks) < 10:
+                keywords = self.GENRE_KEYWORDS.get(genre, [genre])
+                for keyword in keywords[:2]:
+                    try:
+                        results = self.sp.search(
+                            q=f'{keyword} playlist',
+                            type='playlist',
+                            limit=3
+                        )
+                        
+                        for playlist in results['playlists']['items']:
+                            if not playlist:
+                                continue
+                            
+                            try:
+                                tracks_results = self.sp.playlist_tracks(
+                                    playlist['id'],
+                                    limit=20
+                                )
+                                
+                                for item in tracks_results['items']:
+                                    if item and item.get('track') and item['track'].get('id'):
+                                        all_tracks.append(item['track'])
+                                        
+                                    if len(all_tracks) >= limit:
+                                        break
+                                        
+                            except:
+                                continue
+                            
+                            if len(all_tracks) >= limit:
+                                break
+                                
+                    except:
+                        continue
+                    
+                    if len(all_tracks) >= limit:
+                        break
+            
+            logger.info(f"✅ {len(all_tracks)} آهنگ از playlist‌ها")
+            return all_tracks[:limit]
+            
+        except Exception as e:
+            logger.error(f"❌ خطا در جستجوی playlist: {e}")
+            return []
+    
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
     def get_random_track(
         self,
         genre: str,
         exclude_ids: List[str] = None
     ) -> Optional[Dict[str, Any]]:
+<<<<<<< HEAD
         """دریافت یک آهنگ تصادفی با جلوگیری از تکرار قوی‌تر"""
         # دریافت تعداد زیادی آهنگ
         tracks = self.search_tracks_by_genre(genre, limit=100)
         
         if not tracks:
             logger.warning(f"⚠️ هیچ آهنگی برای ژانر {genre} پیدا نشد")
+=======
+        """دریافت یک آهنگ تصادفی از ژانر"""
+        tracks = self.search_tracks_by_genre(genre, limit=50)
+        
+        if not tracks:
+            logger.warning(f"⚠️ هیچ آهنگی برای ژانر {genre} پیدا نشد")
+            # تلاش دوباره با market دیگر
+            logger.info("🔄 تلاش با market بین‌المللی...")
+            tracks = self.search_tracks_by_genre(genre, limit=50, market='')
+        
+        if not tracks:
+            logger.error(f"❌ همچنان آهنگی پیدا نشد برای {genre}")
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
             return None
         
         # فیلتر کردن آهنگ‌های تکراری
@@ -249,11 +422,12 @@ class SpotifyService:
         return None
 
     def format_track_info(self, track: Dict[str, Any]) -> Dict[str, Any]:
-        """فرمت کردن اطلاعات آهنگ"""
+        """فرمت کردن اطلاعات آهنگ برای نمایش"""
         artists = [a['name'] for a in track.get('artists', [])]
         artist_str = ', '.join(artists) if artists else 'Unknown Artist'
         
         duration_ms = track.get('duration_ms', 0)
+        
         album_name = track.get('album', {}).get('name', 'Unknown Album')
         
         return {
@@ -270,18 +444,30 @@ class SpotifyService:
         }
 
 
-# Singleton
+# ==================== Singleton Instance ====================
+
 spotify_service = SpotifyService()
 
 
-# Helper Functions
+# ==================== Helper Functions ====================
+
 def get_random_track_for_user(user_id: int, genre: str) -> Optional[Dict[str, Any]]:
+<<<<<<< HEAD
     """دریافت یک آهنگ تصادفی برای کاربر با جلوگیری قوی از تکرار"""
+=======
+    """
+    دریافت یک آهنگ تصادفی برای کاربر (با چک کردن تاریخچه تکراری)
+    """
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
     from core.database import SessionLocal, SentTrack
     
     db = SessionLocal()
     try:
+<<<<<<< HEAD
         # دریافت 200 آهنگ آخر (بجای 100)
+=======
+        # آهنگ‌های ارسال شده اخیر
+>>>>>>> parent of d32bb2d (Update spotify.py for Persian music )
         sent_tracks = db.query(SentTrack).filter(
             SentTrack.user_id == user_id
         ).order_by(SentTrack.sent_at.desc()).limit(200).all()
@@ -303,3 +489,26 @@ def get_random_track_for_user(user_id: int, genre: str) -> Optional[Dict[str, An
     logger.info(f"✅ آهنگ انتخاب شد: {formatted['name']} - {formatted['artist_str']}")
     
     return formatted
+
+
+if __name__ == "__main__":
+    print("🧪 در حال تست Spotify Service...")
+    
+    if spotify_service.is_available():
+        print("✅ Spotify در دسترس است")
+        
+        # تست ژانرهای مختلف
+        test_genres = ['pop', 'persian', 'kpop']
+        
+        for genre in test_genres:
+            print(f"\n🎵 تست ژانر: {genre}")
+            track = spotify_service.get_random_track(genre)
+            if track:
+                formatted = spotify_service.format_track_info(track)
+                print(f"  نام: {formatted['name']}")
+                print(f"  هنرمند: {formatted['artist_str']}")
+                print(f"  لینک: {formatted['links']['spotify']}")
+            else:
+                print(f"  ⚠️ آهنگی پیدا نشد")
+    else:
+        print("❌ Spotify در دسترس نیست - credentials را چک کنید")
