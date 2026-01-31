@@ -1,5 +1,5 @@
 """
-Music Sender - ارسال موزیک با دکمه لایک
+Music Sender - ارسال موزیک (Fixed with async downloader)
 """
 import logging
 import os
@@ -11,8 +11,7 @@ from telegram.constants import ParseMode
 from core.database import SessionLocal, SentTrack
 from services.spotify import get_random_track_for_user
 from services.musixmatch import get_track_lyrics
-from services.downloader import download_track_safe_async
-from services.like_system import get_like_keyboard
+from services.downloader import download_track_safe_async  # ✅ تغییر به async
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +52,14 @@ async def send_music_to_user(
     genre: str,
     send_to: str = 'private',
     channel_id: Optional[str] = None,
-    download_file: bool = True,
-    track_info: Optional[dict] = None  # برای جستجوی مستقیم
+    download_file: bool = True
 ) -> bool:
-    """ارسال موزیک به کاربر با دکمه لایک"""
+    """ارسال موزیک به کاربر"""
     
     try:
         # دریافت آهنگ
-        if not track_info:
-            logger.info(f"🎵 دریافت آهنگ برای کاربر {user_id}, ژانر: {genre}")
-            track_info = get_random_track_for_user(user_id, genre)
+        logger.info(f"🎵 دریافت آهنگ برای کاربر {user_id}, ژانر: {genre}")
+        track_info = get_random_track_for_user(user_id, genre)
         
         if not track_info:
             logger.warning("❌ آهنگ پیدا نشد")
@@ -93,16 +90,12 @@ async def send_music_to_user(
         # تعیین مقصد
         target_chat = channel_id if send_to == 'channel' else user_id
         
-        # ساخت کیبورد لایک (فقط برای پیوی)
-        reply_markup = None
-        if send_to == 'private':
-            reply_markup = get_like_keyboard(track_info['id'], user_id)
-        
         # دانلود فایل
         file_path = None
         if download_file:
             try:
                 logger.info("📥 شروع دانلود فایل...")
+                # ✅ تغییر به await
                 file_path = await download_track_safe_async(
                     track_name=track_info['name'],
                     artist_name=track_info['artist_str'],
@@ -127,8 +120,7 @@ async def send_music_to_user(
                         parse_mode=ParseMode.HTML,
                         title=track_info['name'],
                         performer=track_info['artist_str'],
-                        duration=int(track_info.get('duration_ms', 0) / 1000) if 'duration_ms' in track_info else None,
-                        reply_markup=reply_markup
+                        duration=int(track_info.get('duration_ms', 0) / 1000) if 'duration_ms' in track_info else None
                     )
                 logger.info("✅ فایل ارسال شد")
                 
@@ -145,8 +137,7 @@ async def send_music_to_user(
                 await bot.send_message(
                     chat_id=target_chat,
                     text=message_text + "\n\n⚠️ فایل در دسترس نبود",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=reply_markup
+                    parse_mode=ParseMode.HTML
                 )
         else:
             # ارسال فقط اطلاعات
@@ -154,8 +145,7 @@ async def send_music_to_user(
             await bot.send_message(
                 chat_id=target_chat,
                 text=message_text + "\n\n💡 از لینک Spotify گوش کن!",
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup
+                parse_mode=ParseMode.HTML
             )
         
         # ذخیره در تاریخچه
