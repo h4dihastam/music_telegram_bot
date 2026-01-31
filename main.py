@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ربات موزیک تلگرام - با قابلیت جستجو
+ربات موزیک تلگرام - با قابلیت جستجو و موزیک فارسی
+نسخه 2.0
 """
 import logging
 import sys
@@ -15,7 +16,7 @@ from core.config import config
 from core.database import init_db
 from core.scheduler import setup_scheduler
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
-from bot.handlers.search import get_search_conversation_handler
+from bot.handlers.search import get_search_conversation_handler  # ✅ اضافه شد
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -91,18 +92,20 @@ async def help_command(update: Update, context):
 /help - این راهنما
 
 🎯 <b>قابلیت‌ها:</b>
-✅ انتخاب ژانر موسیقی
+✅ انتخاب ژانر موسیقی (فارسی و خارجی)
 ✅ ارسال خودکار روزانه
 ✅ ارسال به پیوی یا کانال
 ✅ دریافت متن آهنگ
-✅ دانلود MP3
+✅ دانلود MP3 کامل
 ✅ جستجوی دستی موزیک
+✅ موزیک فارسی (پاپ، سنتی، رپ)
 
 💡 <b>نکات:</b>
 - هر روز در زمان انتخابی موزیک میگیری
 - می‌تونی چند ژانر انتخاب کنی
 - برای کانال، ربات باید ادمین باشه
 - با /search می‌تونی هر آهنگی رو جستجو کنی
+- موزیک فارسی کامل پشتیبانی میشه! 🇮🇷
     """
     await update.message.reply_text(
         help_text,
@@ -133,7 +136,8 @@ async def status_command(update: Update, context):
             f"⏰ زمان ارسال: {settings.send_time}\n"
             f"🎵 ژانرها: {genre_list}\n"
             f"📍 مقصد: {settings.send_to}\n"
-            f"🌍 منطقه زمانی: {settings.timezone}"
+            f"🌍 منطقه زمانی: {settings.timezone}\n"
+            f"🔄 ارسال خودکار: {'✅ فعال' if settings.auto_send_enabled else '❌ غیرفعال'}"
         )
         
         if settings.send_to == 'channel' and settings.channel_id:
@@ -197,7 +201,7 @@ async def main_async():
     app.add_handler(start_handler)
     logger.info("  ✓ Start handler")
     
-    # Search handler - جدید! 🔍
+    # ✅ Search handler - جدید! 🔍
     search_handler = get_search_conversation_handler()
     app.add_handler(search_handler)
     logger.info("  ✓ Search handler")
@@ -225,6 +229,7 @@ async def main_async():
     
     logger.info("="*60)
     logger.info("✅ تمام تنظیمات کامل شد!")
+    logger.info("🎵 نسخه 2.0 - با موزیک فارسی و جستجو")
     logger.info("="*60)
     
     # اجرای bot

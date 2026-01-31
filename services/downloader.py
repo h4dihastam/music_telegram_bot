@@ -1,5 +1,5 @@
 """
-Music Downloader - نسخه قوی‌تر با retry و fallback بهتر
+Music Downloader - نسخه بهبود یافته با حل مشکل دانلود ناقص
 """
 import os
 import logging
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MusicDownloader:
-    """دانلودر موزیک از چند منبع - نسخه بهبود یافته"""
+    """دانلودر موزیک از چند منبع - با فیلتر حجم فایل"""
     
     def __init__(self):
         self.download_dir = config.DOWNLOADS_DIR
@@ -44,15 +44,15 @@ class MusicDownloader:
         self,
         track_name: str,
         artist_name: str,
-        retries: int = 2
+        retries: int = 3
     ) -> Optional[str]:
-        """دانلود از YouTube با retry"""
+        """دانلود از YouTube با چک حجم فایل"""
         
         # جستجوهای مختلف
         search_queries = [
             f"{artist_name} {track_name} official audio",
-            f"{artist_name} {track_name}",
-            f"{track_name} {artist_name} audio",
+            f"{artist_name} {track_name} audio",
+            f"{track_name} {artist_name}",
         ]
         
         for attempt, query in enumerate(search_queries, 1):
@@ -64,23 +64,38 @@ class MusicDownloader:
             # بررسی کش
             for file in self.download_dir.iterdir():
                 if file.stem.startswith(f"yt_{query_hash}") and file.suffix == '.mp3':
-                    logger.info(f"✅ از کش: {file.name}")
-                    return str(file)
+                    file_size = file.stat().st_size
+                    # چک حجم - فایل باید حداقل 500KB باشه
+                    if file_size > 500000:
+                        logger.info(f"✅ از کش: {file.name} ({file_size/1024/1024:.1f}MB)")
+                        return str(file)
+                    else:
+                        logger.warning(f"⚠️ فایل کش خیلی کوچیکه، حذف میشه: {file_size} bytes")
+                        try:
+                            file.unlink()
+                        except:
+                            pass
             
             cmd = [
                 'yt-dlp',
                 f'ytsearch1:{query}',
                 '--extract-audio',
                 '--audio-format', 'mp3',
-                '--audio-quality', '0',
+                '--audio-quality', '0',  # بهترین کیفیت
                 '--output', output_template,
                 '--no-playlist',
                 '--quiet',
                 '--no-warnings',
                 '--no-check-certificates',
                 '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                '--socket-timeout', '20',
-                '--retries', '3',
+                '--socket-timeout', '30',
+                '--retries', '5',
+                '--fragment-retries', '10',
+                '--concurrent-fragments', '4',
+                '--prefer-free-formats',
+                '--postprocessor-args', 'ffmpeg:-y',
+                # اضافه کردن فیلتر مدت زمان - فقط ویدیوهای بیشتر از 1 دقیقه
+                '--match-filter', 'duration > 60',
             ]
             
             try:
@@ -94,7 +109,7 @@ class MusicDownloader:
                 
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=60  # 60 ثانیه
+                    timeout=90  # 90 ثانیه
                 )
                 
                 if process.returncode == 0:
@@ -102,8 +117,17 @@ class MusicDownloader:
                     for file in self.download_dir.iterdir():
                         if file.stem.startswith(f"yt_{query_hash}") and file.suffix == '.mp3':
                             file_size = file.stat().st_size
-                            logger.info(f"✅ YouTube موفق: {file.name} ({file_size/1024/1024:.1f}MB)")
-                            return str(file)
+                            
+                            # فیلتر حجم - حداقل 500KB (حدود 30 ثانیه آهنگ با کیفیت متوسط)
+                            if file_size > 500000:
+                                logger.info(f"✅ YouTube موفق: {file.name} ({file_size/1024/1024:.1f}MB)")
+                                return str(file)
+                            else:
+                                logger.warning(f"⚠️ فایل خیلی کوچیکه ({file_size} bytes), احتمالاً ناقصه")
+                                try:
+                                    file.unlink()
+                                except:
+                                    pass
                 else:
                     error = stderr.decode()[:200] if stderr else "Unknown"
                     logger.debug(f"⚠️ YouTube ناموفق: {error}")
@@ -127,7 +151,7 @@ class MusicDownloader:
         track_name: str, 
         artist_name: str
     ) -> Optional[str]:
-        """دانلود از SoundCloud"""
+        """دانلود از SoundCloud با چک حجم"""
         search_queries = [
             f"{artist_name} {track_name}",
             f"{track_name} {artist_name}",
@@ -142,8 +166,15 @@ class MusicDownloader:
             # بررسی کش
             for file in self.download_dir.iterdir():
                 if file.stem.startswith(f"sc_{query_hash}") and file.suffix == '.mp3':
-                    logger.info(f"✅ از کش: {file.name}")
-                    return str(file)
+                    file_size = file.stat().st_size
+                    if file_size > 500000:
+                        logger.info(f"✅ از کش: {file.name}")
+                        return str(file)
+                    else:
+                        try:
+                            file.unlink()
+                        except:
+                            pass
             
             cmd = [
                 'yt-dlp',
@@ -156,8 +187,9 @@ class MusicDownloader:
                 '--quiet',
                 '--no-warnings',
                 '--no-check-certificates',
-                '--socket-timeout', '20',
-                '--retries', '2',
+                '--socket-timeout', '30',
+                '--retries', '5',
+                '--postprocessor-args', 'ffmpeg:-y',
             ]
             
             try:
@@ -171,14 +203,16 @@ class MusicDownloader:
                 
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=60
+                    timeout=90
                 )
                 
                 if process.returncode == 0:
                     for file in self.download_dir.iterdir():
                         if file.stem.startswith(f"sc_{query_hash}") and file.suffix == '.mp3':
-                            logger.info(f"✅ SoundCloud موفق: {file.name}")
-                            return str(file)
+                            file_size = file.stat().st_size
+                            if file_size > 500000:
+                                logger.info(f"✅ SoundCloud موفق: {file.name} ({file_size/1024/1024:.1f}MB)")
+                                return str(file)
                 else:
                     logger.debug(f"⚠️ SoundCloud ناموفق")
                     
@@ -260,10 +294,7 @@ async def download_track_safe_async(
     preview_url: Optional[str] = None
 ) -> Optional[str]:
     """
-    دانلود با استراتژی چندگانه:
-    1. YouTube (بهترین شانس)
-    2. SoundCloud
-    3. Spotify Preview
+    دانلود با استراتژی چندگانه و فیلتر حجم
     """
     
     # پاکسازی
@@ -271,18 +302,18 @@ async def download_track_safe_async(
     
     logger.info(f"🎵 شروع دانلود: {track_name} - {artist_name}")
     
-    # استراتژی 1: YouTube (شانس بیشتر)
+    # استراتژی 1: YouTube
     logger.info("🎯 استراتژی 1/3: YouTube")
     file_path = await music_downloader.download_from_youtube(
         track_name, artist_name
     )
     if file_path and os.path.exists(file_path):
         file_size = os.path.getsize(file_path)
-        if file_size > 100000:  # بیشتر از 100KB
+        if file_size > 500000:  # بیشتر از 500KB
             logger.info(f"✅ YouTube موفق: {os.path.basename(file_path)}")
             return file_path
         else:
-            logger.warning(f"⚠️ فایل خیلی کوچیکه ({file_size} bytes), حذف میشه")
+            logger.warning(f"⚠️ فایل خیلی کوچیکه ({file_size} bytes)")
             try:
                 os.remove(file_path)
             except:
@@ -295,39 +326,17 @@ async def download_track_safe_async(
     )
     if file_path and os.path.exists(file_path):
         file_size = os.path.getsize(file_path)
-        if file_size > 100000:
+        if file_size > 500000:
             logger.info(f"✅ SoundCloud موفق: {os.path.basename(file_path)}")
             return file_path
     
-    # استراتژی 3: Preview (آخرین راه)
+    # استراتژی 3: Preview (فقط اگه هیچ راهی نبود)
     if preview_url:
-        logger.info("🎯 استراتژی 3/3: Spotify Preview")
+        logger.info("🎯 استراتژی 3/3: Spotify Preview (30 ثانیه)")
         file_path = await music_downloader.download_preview_from_spotify(preview_url)
         if file_path and os.path.exists(file_path):
-            logger.warning("⚠️ فقط Preview 30 ثانیه")
+            logger.warning("⚠️ فقط Preview 30 ثانیه در دسترس بود")
             return file_path
     
     logger.error("❌ همه روش‌ها شکست خوردند")
     return None
-
-
-# تست
-if __name__ == "__main__":
-    import asyncio
-    
-    async def test():
-        print("🧪 تست Downloader...")
-        
-        # تست
-        result = await download_track_safe_async(
-            "Blinding Lights",
-            "The Weeknd"
-        )
-        
-        if result:
-            print(f"✅ دانلود موفق: {result}")
-            print(f"   حجم: {os.path.getsize(result)/1024/1024:.1f}MB")
-        else:
-            print("❌ دانلود ناموفق")
-    
-    asyncio.run(test())
