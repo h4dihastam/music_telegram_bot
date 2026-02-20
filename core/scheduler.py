@@ -2,8 +2,9 @@
 Scheduler برای ارسال خودکار روزانه موزیک
 """
 import logging
-from datetime import datetime, time as dt_time
+from datetime import time as dt_time
 import random
+
 import pytz
 from telegram.ext import JobQueue, ContextTypes
 
@@ -15,13 +16,26 @@ logger = logging.getLogger(__name__)
 
 class MusicScheduler:
     """کلاس مدیریت Scheduler با JobQueue"""
-    
+
     def __init__(self, job_queue: JobQueue):
         self.job_queue = job_queue
         logger.info("✅ Scheduler با JobQueue راه‌اندازی شد")
-    
+
     def start(self):
         logger.info("✅ Scheduler آماده است")
+
+    @staticmethod
+    def _safe_timezone(timezone: str):
+        """اعتبارسنجی timezone و fallback به پیش‌فرض"""
+        try:
+            return pytz.timezone(timezone)
+        except Exception:
+            logger.warning(
+                "⚠️ timezone نامعتبر (%s) - استفاده از %s",
+                timezone,
+                config.DEFAULT_TIMEZONE,
+            )
+            return pytz.timezone(config.DEFAULT_TIMEZONE)
 
     def add_or_update_user_job(
         self,
@@ -35,17 +49,15 @@ class MusicScheduler:
         try:
             hour, minute = map(int, send_time.split(':'))
             job_id = f'user_{user_id}'
-            
+
             # حذف job قبلی
             existing_jobs = self.job_queue.get_jobs_by_name(job_id)
             for job in existing_jobs:
                 job.schedule_removal()
-            
-            # ساخت time object با timezone
-            tz = pytz.timezone(timezone)
+
+            tz = self._safe_timezone(timezone)
             job_time = dt_time(hour=hour, minute=minute, tzinfo=tz)
-            
-            # اضافه کردن job (بدون tzinfo در parameters)
+
             self.job_queue.run_daily(
                 callback=self.send_daily_music,
                 time=job_time,
@@ -53,17 +65,55 @@ class MusicScheduler:
                 name=job_id,
                 data=user_id
             )
-            
-            logger.info(f"✅ Job روزانه برای کاربر {user_id} در {send_time} ({timezone}) تنظیم شد")
-            
+
+            logger.info(
+                "✅ Job روزانه برای کاربر %s در %s (%s) تنظیم شد",
+                user_id,
+                send_time,
+                tz.zone,
+            )
+
         except Exception as e:
-            logger.error(f"❌ خطا در تنظیم job برای کاربر {user_id}: {e}")
+            logger.error(f"❌ خطا در تنظیم job برای کاربر {user_id}: {e}", exc_info=True)
+
+    def bootstrap_existing_jobs(self):
+        """بعد از بالا آمدن ربات، job کاربران قبلی را دوباره schedule می‌کند."""
+        db = SessionLocal()
+        try:
+            all_settings = db.query(UserSettings).all()
+            restored_count = 0
+
+            for settings in all_settings:
+                if not settings.send_time:
+                    continue
+
+                has_genre = (
+                    db.query(UserGenre)
+                    .filter(UserGenre.user_id == settings.user_id)
+                    .first()
+                    is not None
+                )
+                if not has_genre:
+                    continue
+
+                self.add_or_update_user_job(
+                    user_id=settings.user_id,
+                    send_time=settings.send_time,
+                    timezone=settings.timezone or config.DEFAULT_TIMEZONE,
+                )
+                restored_count += 1
+
+            logger.info("✅ %s job از دیتابیس بازیابی شد", restored_count)
+        except Exception as e:
+            logger.error("❌ خطا در بازیابی jobها: %s", e, exc_info=True)
+        finally:
+            db.close()
 
     async def send_daily_music(self, context: ContextTypes.DEFAULT_TYPE):
         """ارسال روزانه موزیک"""
         user_id = context.job.data
         logger.info(f"📤 ارسال روزانه موزیک برای کاربر {user_id}")
-        
+
         db = SessionLocal()
         try:
             genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
@@ -74,16 +124,16 @@ class MusicScheduler:
                     text="⚠️ هیچ ژانری انتخاب نکردی!\n\nاز /start استفاده کن."
                 )
                 return
-            
+
             genre = random.choice([g.genre for g in genres])
             settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-            
+
             if not settings:
                 return
-            
+
             send_to = settings.send_to
             channel_id = settings.channel_id if send_to == 'channel' else None
-            
+
             from services.music_sender import send_music_to_user
             success = await send_music_to_user(
                 bot=context.bot,
@@ -93,20 +143,20 @@ class MusicScheduler:
                 channel_id=channel_id,
                 download_file=True
             )
-            
+
             if success:
                 logger.info(f"✅ موزیک روزانه ارسال شد")
             else:
                 logger.warning(f"⚠️ ارسال ناموفق")
-                
+
         except Exception as e:
-            logger.error(f"❌ خطا در ارسال روزانه: {e}")
+            logger.error(f"❌ خطا در ارسال روزانه: {e}", exc_info=True)
             try:
                 await context.bot.send_message(
                     chat_id=user_id,
                     text="❌ متأسفانه نتونستم امروز موزیک بفرستم!\n\nفردا دوباره امتحان می‌کنم 🎵"
                 )
-            except:
+            except Exception:
                 pass
         finally:
             db.close()
@@ -115,6 +165,7 @@ class MusicScheduler:
 def setup_scheduler(job_queue: JobQueue) -> MusicScheduler:
     scheduler = MusicScheduler(job_queue)
     scheduler.start()
+    scheduler.bootstrap_existing_jobs()
     return scheduler
 
 
@@ -122,25 +173,25 @@ def schedule_user_daily_music_helper(user_id: int, scheduler: MusicScheduler):
     """تابع کمکی برای schedule کردن"""
     if not scheduler:
         return
-    
+
     db = SessionLocal()
     try:
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        
+
         if not settings or not settings.send_time:
             return
-        
+
         genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
         if not genres:
             return
-        
+
         scheduler.add_or_update_user_job(
             user_id=user_id,
             send_time=settings.send_time,
             timezone=settings.timezone or config.DEFAULT_TIMEZONE
         )
-        
+
     except Exception as e:
-        logger.error(f"❌ خطا در schedule کردن: {e}")
+        logger.error(f"❌ خطا در schedule کردن: {e}", exc_info=True)
     finally:
         db.close()
