@@ -4,7 +4,7 @@ Scheduler برای ارسال خودکار روزانه موزیک
 import logging
 from datetime import datetime, time as dt_time
 import random
-import pytz
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from telegram.ext import JobQueue, ContextTypes
 
 from core.database import SessionLocal, UserGenre, UserSettings
@@ -41,8 +41,18 @@ class MusicScheduler:
             for job in existing_jobs:
                 job.schedule_removal()
             
-            # ساخت time object با timezone
-            tz = pytz.timezone(timezone)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError("send_time must be in HH:MM (00:00-23:59)")
+
+            # ساخت time object با timezone استاندارد
+            try:
+                tz = ZoneInfo(timezone)
+            except ZoneInfoNotFoundError:
+                logger.warning(
+                    f"⚠️ timezone نامعتبر '{timezone}'؛ fallback به {config.DEFAULT_TIMEZONE}"
+                )
+                tz = ZoneInfo(config.DEFAULT_TIMEZONE)
+
             job_time = dt_time(hour=hour, minute=minute, tzinfo=tz)
             
             # اضافه کردن job (بدون tzinfo در parameters)
