@@ -6,7 +6,7 @@ import logging
 import re
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, MessageHandler, filters
+from telegram.ext import ContextTypes, MessageHandler, CallbackQueryHandler, filters
 from pathlib import Path
 
 from services.music_recognition import recognition_service, recognize_music_from_instagram
@@ -16,6 +16,59 @@ from core.database import SessionLocal, DownloadedTrack
 
 logger = logging.getLogger(__name__)
 
+
+
+async def handle_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تشخیص آهنگ از فایل صوتی ارسال‌شده توسط کاربر."""
+    if not recognition_service.is_available():
+        await update.message.reply_text(
+            "❌ متأسفانه سرویس تشخیص آهنگ در دسترس نیست!\n\n"
+            "می‌تونی اسم آهنگ یا خواننده رو بفرستی."
+        )
+        return
+
+    audio = update.message.audio or update.message.document
+    if not audio:
+        return
+
+    if getattr(audio, 'file_size', 0) and audio.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("❌ حجم فایل زیاد است! لطفاً یک نمونه کوتاه‌تر (حداکثر 20MB) بفرست.")
+        return
+
+    msg = await update.message.reply_text("🎧 در حال تشخیص آهنگ از فایل ارسالی...\n⏳ چند ثانیه صبر کن...")
+    suffix = Path(getattr(audio, 'file_name', '') or 'sample.mp3').suffix or '.mp3'
+    file_path = Path("temp") / f"audio_{update.effective_user.id}{suffix}"
+
+    try:
+        file = await context.bot.get_file(audio.file_id)
+        await file.download_to_drive(file_path)
+        result = await recognition_service.recognize_from_file(str(file_path))
+
+        if result and result.get('title'):
+            track_name = result['title']
+            artist = ', '.join(result.get('artists', ['Unknown']))
+            await msg.edit_text(
+                f"✅ <b>آهنگ پیدا شد!</b> 🎉\n\n"
+                f"🎵 {track_name}\n"
+                f"🎤 {artist}\n\n"
+                f"📥 در حال جستجو و ارسال...",
+                parse_mode='HTML'
+            )
+            await search_and_send_track(update, context, track_name, artist, source='audio')
+        else:
+            await msg.edit_text(
+                "😕 نتونستم آهنگ رو از فایل تشخیص بدم.\n\n"
+                "یک نمونه واضح‌تر بفرست یا اسم آهنگ/خواننده رو مستقیم بنویس."
+            )
+    except Exception as e:
+        logger.error(f"❌ خطا در تشخیص فایل صوتی: {e}", exc_info=True)
+        await msg.edit_text("❌ مشکلی در پردازش فایل پیش اومد!")
+    finally:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        context.user_data.pop('waiting_for', None)
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پردازش ویس برای تشخیص آهنگ"""
@@ -459,10 +512,40 @@ async def send_track_to_user(
             db.close()
 
 
+
+async def handle_send_track_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ارسال آهنگ انتخاب‌شده از نتایج جستجوی سریع/متن."""
+    query = update.callback_query
+    await query.answer()
+
+    track_id = query.data.replace('send_track_', '', 1)
+    try:
+        track = spotify_service.sp.track(track_id)
+        track_info = spotify_service.format_track_info(track)
+        await query.edit_message_text(
+            f"✅ انتخاب شد!\n\n"
+            f"🎵 {track_info['name']}\n"
+            f"🎤 {track_info['artist_str']}\n\n"
+            f"📥 در حال ارسال..."
+        )
+        await send_music_to_user(
+            bot=context.bot,
+            user_id=update.effective_user.id,
+            genre='search',
+            send_to='private',
+            download_file=True,
+            track_info=track_info
+        )
+    except Exception as e:
+        logger.error(f"❌ خطا در ارسال آهنگ انتخاب شده: {e}", exc_info=True)
+        await query.edit_message_text("❌ نتونستم این آهنگ رو ارسال کنم. دوباره امتحان کن.")
+
 def get_input_processor_handlers():
     """لیست handler های پردازش ورودی"""
     return [
+        MessageHandler(filters.AUDIO | filters.Document.AUDIO, handle_audio_message),
         MessageHandler(filters.VOICE, handle_voice_message),
         MessageHandler(filters.VIDEO, handle_video_message),
+        CallbackQueryHandler(handle_send_track_callback, pattern=r'^send_track_'),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_input),
     ]

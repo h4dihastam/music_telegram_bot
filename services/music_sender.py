@@ -1,11 +1,11 @@
 """
-Music Sender - ارسال موزیک با دکمه لایک
+Music Sender - با پشتیبانی از _needs_search و fix خطای like
 """
 import logging
 import os
 from typing import Optional
 from telegram import Bot
-from telegram.error import TelegramError
+from telegram.error import TelegramError, BadRequest
 from telegram.constants import ParseMode
 
 from core.database import SessionLocal, SentTrack
@@ -17,27 +17,19 @@ from services.like_system import get_like_keyboard
 logger = logging.getLogger(__name__)
 
 
-def format_track_message(
-    track_info: dict, 
-    lyrics: Optional[str] = None
-) -> str:
-    """فرمت کردن پیام"""
+def format_track_message(track_info: dict, lyrics: Optional[str] = None) -> str:
     message = f"🎵 <b>{track_info['name']}</b>\n"
     message += f"🎤 {track_info['artist_str']}\n"
     message += f"💿 {track_info['album']}\n"
     message += f"⏱ {track_info['duration']}\n\n"
     
-    # لینک‌ها
     links = track_info.get('links', {})
     if links.get('spotify'):
         message += f"🎧 <a href='{links['spotify']}'>Spotify</a>"
-    
     if links.get('preview'):
         message += f" | <a href='{links['preview']}'>Preview</a>"
-    
     message += "\n"
     
-    # متن آهنگ
     if lyrics:
         from services.musixmatch import lyrics_service
         formatted_lyrics = lyrics_service.format_lyrics_for_telegram(lyrics)
@@ -54,12 +46,10 @@ async def send_music_to_user(
     send_to: str = 'private',
     channel_id: Optional[str] = None,
     download_file: bool = True,
-    track_info: Optional[dict] = None  # برای جستجوی مستقیم
+    track_info: Optional[dict] = None
 ) -> bool:
-    """ارسال موزیک به کاربر با دکمه لایک"""
     
     try:
-        # دریافت آهنگ
         if not track_info:
             logger.info(f"🎵 دریافت آهنگ برای کاربر {user_id}, ژانر: {genre}")
             track_info = get_random_track_for_user(user_id, genre)
@@ -68,37 +58,32 @@ async def send_music_to_user(
             logger.warning("❌ آهنگ پیدا نشد")
             await bot.send_message(
                 chat_id=user_id,
-                text="❌ متأسفانه نتونستم آهنگ مناسبی پیدا کنم!\n\n"
-                     "لطفاً بعداً دوباره امتحان کن."
+                text="❌ متأسفانه نتونستم آهنگ مناسبی پیدا کنم!\n\nلطفاً بعداً دوباره امتحان کن."
             )
             return False
         
-        logger.info(f"✅ آهنگ پیدا شد: {track_info['name']} - {track_info['artist_str']}")
+        # اگه آهنگ از حالت fallback باشه (بدون نام)، نام هنرمند رو می‌ذاریم
+        if track_info.get('_needs_search') and not track_info.get('name'):
+            track_info['name'] = f"آهنگ از {track_info['artist_str']}"
         
-        # دریافت متن
+        logger.info(f"✅ آهنگ: {track_info['name']} - {track_info['artist_str']}")
+        
+        # متن آهنگ
         lyrics = None
         try:
-            lyrics = get_track_lyrics(
-                track_info['name'], 
-                track_info['artist_str']
-            )
-            if lyrics:
-                logger.info("✅ متن آهنگ دریافت شد")
+            if track_info.get('name') and not track_info.get('_needs_search'):
+                lyrics = get_track_lyrics(track_info['name'], track_info['artist_str'])
         except Exception as e:
-            logger.warning(f"⚠️ خطا در دریافت متن: {e}")
+            logger.warning(f"⚠️ خطا در متن: {e}")
         
-        # فرمت پیام
         message_text = format_track_message(track_info, lyrics)
-        
-        # تعیین مقصد
         target_chat = channel_id if send_to == 'channel' else user_id
         
-        # ساخت کیبورد لایک (فقط برای پیوی)
         reply_markup = None
-        if send_to == 'private':
+        if send_to == 'private' and track_info.get('id'):
             reply_markup = get_like_keyboard(track_info['id'], user_id)
         
-        # دانلود فایل
+        # دانلود
         file_path = None
         if download_file:
             try:
@@ -109,7 +94,6 @@ async def send_music_to_user(
                     spotify_url=track_info['links'].get('spotify'),
                     preview_url=track_info['links'].get('preview')
                 )
-                
                 if file_path:
                     logger.info(f"✅ فایل دانلود شد: {file_path}")
             except Exception as e:
@@ -127,21 +111,15 @@ async def send_music_to_user(
                         parse_mode=ParseMode.HTML,
                         title=track_info['name'],
                         performer=track_info['artist_str'],
-                        duration=int(track_info.get('duration_ms', 0) / 1000) if 'duration_ms' in track_info else None,
                         reply_markup=reply_markup
                     )
                 logger.info("✅ فایل ارسال شد")
-                
-                # پاک کردن فایل
                 try:
                     os.remove(file_path)
-                    logger.info("🗑️ فایل پاک شد")
                 except:
                     pass
-                    
             except Exception as e:
                 logger.error(f"❌ خطا در ارسال فایل: {e}")
-                # ارسال فقط متن
                 await bot.send_message(
                     chat_id=target_chat,
                     text=message_text + "\n\n⚠️ فایل در دسترس نبود",
@@ -149,8 +127,7 @@ async def send_music_to_user(
                     reply_markup=reply_markup
                 )
         else:
-            # ارسال فقط اطلاعات
-            logger.info("📤 ارسال اطلاعات (بدون فایل)...")
+            logger.info("📤 ارسال بدون فایل...")
             await bot.send_message(
                 chat_id=target_chat,
                 text=message_text + "\n\n💡 از لینک Spotify گوش کن!",
@@ -168,19 +145,17 @@ async def send_music_to_user(
                 artist=track_info['artist_str']
             ))
             db.commit()
-            logger.info("✅ در تاریخچه ذخیره شد")
         finally:
             db.close()
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ خطای کلی در ارسال: {e}", exc_info=True)
+        logger.error(f"❌ خطای کلی: {e}", exc_info=True)
         try:
             await bot.send_message(
                 chat_id=user_id,
-                text="❌ متأسفانه مشکلی پیش اومد!\n\n"
-                     "لطفاً بعداً دوباره امتحان کن."
+                text="❌ متأسفانه مشکلی پیش اومد!\n\nلطفاً بعداً دوباره امتحان کن."
             )
         except:
             pass
@@ -188,38 +163,21 @@ async def send_music_to_user(
 
 
 async def send_random_music_now(bot: Bot, user_id: int):
-    """ارسال موزیک تصادفی الان"""
+    from core.database import SessionLocal, UserGenre
+    import random
+    
     db = SessionLocal()
     try:
-        from core.database import UserGenre
-        import random
-        
-        genres = db.query(UserGenre).filter(
-            UserGenre.user_id == user_id
-        ).all()
-        
+        genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
         if not genres:
             await bot.send_message(
                 chat_id=user_id,
-                text="❌ هنوز ژانری انتخاب نکردی!\n\n"
-                     "/start بزن تا شروع کنیم."
+                text="❌ هنوز ژانری انتخاب نکردی!\n\n/start بزن تا شروع کنیم."
             )
             return
-        
         genre = random.choice([g.genre for g in genres])
-        
-        await bot.send_message(
-            chat_id=user_id,
-            text="🎵 در حال پیدا کردن آهنگ...\n⏳ لحظه‌ای صبر کن..."
-        )
-        
-        await send_music_to_user(
-            bot=bot,
-            user_id=user_id,
-            genre=genre,
-            send_to='private',
-            download_file=True
-        )
-        
     finally:
         db.close()
+    
+    await bot.send_message(chat_id=user_id, text="🎵 در حال پیدا کردن آهنگ...\n⏳ لحظه‌ای صبر کن...")
+    await send_music_to_user(bot=bot, user_id=user_id, genre=genre, send_to='private', download_file=True)

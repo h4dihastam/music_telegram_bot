@@ -78,7 +78,7 @@ class MusicScheduler:
             genre = random.choice([g.genre for g in genres])
             settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
             
-            if not settings:
+            if not settings or not settings.auto_send_enabled:
                 return
             
             send_to = settings.send_to
@@ -127,7 +127,7 @@ def schedule_user_daily_music_helper(user_id: int, scheduler: MusicScheduler):
     try:
         settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         
-        if not settings or not settings.send_time:
+        if not settings or not settings.send_time or not settings.auto_send_enabled:
             return
         
         genres = db.query(UserGenre).filter(UserGenre.user_id == user_id).all()
@@ -142,5 +142,38 @@ def schedule_user_daily_music_helper(user_id: int, scheduler: MusicScheduler):
         
     except Exception as e:
         logger.error(f"❌ خطا در schedule کردن: {e}")
+    finally:
+        db.close()
+
+def schedule_all_active_users(scheduler: MusicScheduler):
+    """زمان‌بندی همه کاربران فعال بعد از ری‌استارت برنامه."""
+    if not scheduler:
+        return
+
+    db = SessionLocal()
+    try:
+        settings_rows = db.query(UserSettings).filter(
+            UserSettings.auto_send_enabled == True,  # noqa: E712
+            UserSettings.send_time.isnot(None)
+        ).all()
+
+        scheduled_count = 0
+        for settings in settings_rows:
+            has_genre = db.query(UserGenre).filter(
+                UserGenre.user_id == settings.user_id
+            ).first()
+            if not has_genre:
+                continue
+
+            scheduler.add_or_update_user_job(
+                user_id=settings.user_id,
+                send_time=settings.send_time,
+                timezone=settings.timezone or config.DEFAULT_TIMEZONE
+            )
+            scheduled_count += 1
+
+        logger.info(f"✅ {scheduled_count} کاربر فعال زمان‌بندی شدند")
+    except Exception as e:
+        logger.error(f"❌ خطا در زمان‌بندی کاربران فعال: {e}")
     finally:
         db.close()
