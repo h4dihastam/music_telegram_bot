@@ -14,9 +14,11 @@ from aiohttp import web
 
 from core.config import config
 from core.database import init_db
-from core.scheduler import setup_scheduler
+from core.scheduler import setup_scheduler, schedule_all_active_users
 from bot.handlers import get_start_conversation_handler, get_settings_handlers
 from bot.handlers.search import get_search_conversation_handler  # ✅ اضافه شد
+from bot.handlers.main_menu import get_main_menu_handlers
+from bot.handlers.input_processor import get_input_processor_handlers
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -216,6 +218,16 @@ async def main_async():
     for handler in get_settings_handlers():
         app.add_handler(handler)
     logger.info("  ✓ Settings handlers")
+
+    # Reply menu handlers
+    for handler in get_main_menu_handlers():
+        app.add_handler(handler, group=0)
+    logger.info("  ✓ Main menu handlers")
+
+    # Voice/audio/video/link/name processors run after menu routing
+    for handler in get_input_processor_handlers():
+        app.add_handler(handler, group=1)
+    logger.info("  ✓ Input processor handlers")
     
     app.add_error_handler(error_handler)
     logger.info("  ✓ Error handler")
@@ -223,6 +235,7 @@ async def main_async():
     logger.info("⏰ راه‌اندازی Scheduler...")
     scheduler = setup_scheduler(app.job_queue)
     app.bot_data['scheduler'] = scheduler
+    schedule_all_active_users(scheduler)
     logger.info("✅ Scheduler OK")
     
     app.post_init = post_init

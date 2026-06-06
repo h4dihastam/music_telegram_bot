@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError, BadRequest, Forbidden
 
-from core.database import get_or_create_user, SessionLocal, UserSettings
+from core.database import get_or_create_user, SessionLocal, UserSettings, UserGenre
 from bot.keyboards.reply import get_main_menu_reply_keyboard
 from bot.keyboards.inline import (
     get_time_selection_keyboard,
@@ -43,8 +43,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         settings = db.query(UserSettings).filter(
             UserSettings.user_id == user.id
         ).first()
+        genres_count = db.query(UserGenre).filter(UserGenre.user_id == user.id).count()
         
-        has_setup = settings is not None
+        has_setup = settings is not None and genres_count > 0
     finally:
         db.close()
     
@@ -82,7 +83,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⏰ ارسال خودکار روزانه
 🇮🇷 آهنگ‌های ایرانی کامل
 
-<i>بیا شروع کنیم! اول ژانر مورد علاقه‌ات رو انتخاب کن 👇</i>
+<i>بیا شروع کنیم! اول زمان ارسال روزانه رو انتخاب کن 👇</i>
         """
     
     if update.message:
@@ -93,9 +94,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     if not has_setup:
-        # نمایش انتخاب ژانر برای کاربران جدید
-        await show_genre_selection(update, context, edit=False)
-        return CHOOSING_GENRE
+        # شروع نصب اولیه: اول زمان، بعد ژانر، بعد مقصد
+        context.user_data['setup_flow'] = 'time_first'
+        if update.message:
+            await update.message.reply_text(
+                "⏰ چه ساعتی هر روز موزیک بفرستم؟",
+                reply_markup=get_time_selection_keyboard()
+            )
+        return SETTING_TIME
     
     return ConversationHandler.END
 
@@ -133,6 +139,14 @@ async def time_selection_handler(update: Update, context: ContextTypes.DEFAULT_T
         finally:
             db.close()
         
+        if context.user_data.get('setup_flow') == 'time_first':
+            await query.edit_message_text(
+                text=f"✅ زمان ارسال به {send_time} تنظیم شد!\n\n"
+                     "حالا ژانرهای مورد علاقه‌ات رو انتخاب کن:",
+            )
+            await show_genre_selection(update, context, edit=False)
+            return CHOOSING_GENRE
+
         await query.edit_message_text(
             text=f"✅ زمان ارسال به {send_time} تنظیم شد!\n\n"
                  "حالا کجا بفرستم؟",
@@ -171,6 +185,14 @@ async def custom_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     finally:
         db.close()
     
+    if context.user_data.get('setup_flow') == 'time_first':
+        await update.message.reply_text(
+            text=f"✅ زمان ارسال به {time_str} تنظیم شد!\n\n"
+                 "حالا ژانرهای مورد علاقه‌ات رو انتخاب کن:"
+        )
+        await show_genre_selection(update, context, edit=False)
+        return CHOOSING_GENRE
+
     await update.message.reply_text(
         text=f"✅ زمان ارسال به {time_str} تنظیم شد!\n\n"
              "حالا کجا بفرستم؟",
@@ -212,6 +234,7 @@ async def destination_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             
             # ارسال منوی اصلی
+            context.user_data.pop('setup_flow', None)
             await context.bot.send_message(
                 chat_id=user_id,
                 text="🎵 منوی اصلی:",
@@ -274,6 +297,7 @@ async def channel_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         finally:
             db.close()
 
+        context.user_data.pop('setup_flow', None)
         await update.message.reply_text(
             f"✅ <b>عالی! همه چیز آماده!</b> 🎉\n\n"
             f"📢 کانال: {chat.title if hasattr(chat, 'title') else display_id}\n\n"

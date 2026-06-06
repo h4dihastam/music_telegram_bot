@@ -51,6 +51,9 @@ def get_search_menu_keyboard():
             KeyboardButton("📜 اسم آهنگ یا خواننده"),
         ],
         [
+            KeyboardButton("🎧 ارسال فایل آهنگ"),
+        ],
+        [
             KeyboardButton("🔙 برگشت به منو اصلی")
         ]
     ]

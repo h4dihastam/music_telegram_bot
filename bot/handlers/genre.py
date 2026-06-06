@@ -7,8 +7,8 @@ from telegram import Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler
 
 from core.database import SessionLocal, UserGenre
-from bot.keyboards.inline import get_genres_keyboard, get_time_selection_keyboard, get_back_to_menu_button
-from bot.states import CHOOSING_GENRE, SETTING_TIME
+from bot.keyboards.inline import get_genres_keyboard, get_time_selection_keyboard, get_back_to_menu_button, get_destination_keyboard
+from bot.states import CHOOSING_GENRE, SETTING_TIME, CHOOSING_DESTINATION
 
 GENRES_FILE = os.path.join(os.path.dirname(__file__), "../../data/genres.json")
 
@@ -47,6 +47,12 @@ async def show_genre_selection(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         if update.message:
             await update.message.reply_text(
+                text=text,
+                reply_markup=get_genres_keyboard(selected)
+            )
+        elif update.effective_chat:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
                 text=text,
                 reply_markup=get_genres_keyboard(selected)
             )
@@ -107,7 +113,16 @@ async def handle_genre_selection(update: Update, context: ContextTypes.DEFAULT_T
         genre_names = [g["name"] for g in GENRES_LIST if g["id"] in selected]
         genre_text = ", ".join(genre_names)
         
-        # در حالت /start باید بره به انتخاب زمان
+        if context.user_data.get('setup_flow') == 'time_first':
+            await query.edit_message_text(
+                text=f"✅ ژانرها ذخیره شدند!\n\n"
+                     f"🎵 انتخاب‌ها: {genre_text}\n\n"
+                     f"حالا مقصد ارسال روزانه رو انتخاب کن:",
+                reply_markup=get_destination_keyboard()
+            )
+            return CHOOSING_DESTINATION
+
+        # در حالت تغییر ژانر قدیمی، بعد از ژانر زمان را هم پیشنهاد می‌کنیم
         await query.edit_message_text(
             text=f"✅ ژانرها ذخیره شدند!\n\n"
                  f"🎵 انتخاب‌ها: {genre_text}\n\n"

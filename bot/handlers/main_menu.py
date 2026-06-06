@@ -16,8 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_main_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت دکمه‌های منوی اصلی"""
+    """مدیریت دکمه‌های منوی اصلی و زیرمنوهای Reply."""
     text = update.message.text
+
+    menu_state = context.user_data.get('menu_state', 'main')
+    if menu_state == 'search' and text not in {"🔍 جستجوی سریع", "🔙 برگشت", "🔙 برگشت به منو"}:
+        await handle_search_menu_buttons(update, context)
+        return
+    if menu_state == 'downloads' and text not in {"📥 دانلودهای من", "🔙 برگشت به منو"}:
+        await handle_downloads_menu_buttons(update, context)
+        return
+
     user_id = update.effective_user.id
     
     # 🔍 جستجوی سریع
@@ -91,6 +100,15 @@ async def handle_search_menu_buttons(update: Update, context: ContextTypes.DEFAU
         )
         context.user_data['waiting_for'] = 'voice_or_lyrics'
     
+    # 🎧 ارسال فایل آهنگ
+    elif text == "🎧 ارسال فایل آهنگ":
+        await update.message.reply_text(
+            "🎧 <b>تشخیص آهنگ از فایل</b>\n\n"
+            "یک فایل صوتی یا آهنگ کوتاه بفرست تا شناسایی کنم و نسخه قابل ارسالش رو پیدا کنم.",
+            parse_mode='HTML'
+        )
+        context.user_data['waiting_for'] = 'audio_file'
+
     # 🎬 کلیپ حاوی آهنگ
     elif text == "🎬 کلیپ حاوی آهنگ":
         await update.message.reply_text(
