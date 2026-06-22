@@ -3,6 +3,7 @@ Music Sender - ارسال موزیک (Fixed with async downloader)
 """
 import logging
 import os
+from html import escape
 from typing import Optional
 from telegram import Bot
 from telegram.error import TelegramError
@@ -21,18 +22,25 @@ def format_track_message(
     lyrics: Optional[str] = None
 ) -> str:
     """فرمت کردن پیام"""
-    message = f"🎵 <b>{track_info['name']}</b>\n"
-    message += f"🎤 {track_info['artist_str']}\n"
-    message += f"💿 {track_info['album']}\n"
-    message += f"⏱ {track_info['duration']}\n\n"
+    track_name = escape(str(track_info.get('name', 'Unknown')))
+    artist_name = escape(str(track_info.get('artist_str', 'Unknown')))
+    album_name = escape(str(track_info.get('album', 'Unknown')))
+    duration = escape(str(track_info.get('duration', '-')))
+
+    message = f"🎵 <b>{track_name}</b>\n"
+    message += f"🎤 {artist_name}\n"
+    message += f"💿 {album_name}\n"
+    message += f"⏱ {duration}\n\n"
     
     # لینک‌ها
     links = track_info.get('links', {})
     if links.get('spotify'):
-        message += f"🎧 <a href='{links['spotify']}'>Spotify</a>"
+        spotify_url = escape(str(links['spotify']), quote=True)
+        message += f"🎧 <a href=\"{spotify_url}\">Spotify</a>"
     
     if links.get('preview'):
-        message += f" | <a href='{links['preview']}'>Preview</a>"
+        preview_url = escape(str(links['preview']), quote=True)
+        message += f" | <a href=\"{preview_url}\">Preview</a>"
     
     message += "\n"
     

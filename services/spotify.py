@@ -189,24 +189,33 @@ def get_random_track_for_user(user_id: int, genre: str) -> Optional[Dict[str, An
     دریافت یک آهنگ تصادفی برای کاربر (با چک کردن تاریخچه تکراری)
     """
     from core.database import SessionLocal, SentTrack
-    
+
     db = SessionLocal()
     try:
         sent_tracks = db.query(SentTrack).filter(
             SentTrack.user_id == user_id
         ).order_by(SentTrack.sent_at.desc()).limit(50).all()
-        
-        exclude_ids = [t.track_id for t in sent_tracks]
+
+        exclude_ids = [t.track_id for t in sent_tracks if t.track_id]
     finally:
         db.close()
-    
+
+    # تلاش اول: بدون تکرار آهنگ‌های اخیر
     track = spotify_service.get_random_track(genre, exclude_ids=exclude_ids)
-    
+
+    # fallback: اگر pool خالی شد یا API نتیجه نداد، یکبار بدون exclude تلاش کن
+    if not track:
+        logger.info(
+            f"ℹ️ fallback: تلاش مجدد بدون exclude_ids برای کاربر {user_id}، ژانر {genre}"
+        )
+        track = spotify_service.get_random_track(genre, exclude_ids=None)
+
     if not track:
         logger.warning(f"⚠️ آهنگی برای کاربر {user_id} و ژانر {genre} پیدا نشد")
         return None
-    
+
     return spotify_service.format_track_info(track)
+
 
 
 if __name__ == "__main__":
